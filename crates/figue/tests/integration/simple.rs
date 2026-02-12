@@ -134,15 +134,19 @@ fn test_short_rename() {
 }
 
 #[test]
-fn test_duplicate_non_multiple_named_last_value_wins() {
+fn test_duplicate_non_multiple_named_reports_clear_error() {
     #[derive(Facet, Debug)]
     struct Args {
         #[facet(args::named)]
         port: u16,
     }
 
-    let args: Args = figue::from_slice(&["--port", "1", "--port", "2"]).unwrap();
-    assert_eq!(args.port, 2);
+    let err = figue::from_slice::<Args>(&["--port", "1", "--port", "2"]).unwrap_err();
+    let msg = err.to_string();
+
+    assert!(msg.contains("provided multiple times"), "{msg}");
+    assert!(msg.contains("--port"), "{msg}");
+    assert!(!msg.contains("expected scalar value"), "{msg}");
 }
 
 #[test]

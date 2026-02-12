@@ -954,6 +954,7 @@ impl<'a> ParseContext<'a> {
         value: ConfigValue,
         is_multiple: bool,
     ) {
+        let mut duplicate_non_multiple = false;
         let result_map = match target {
             InsertTarget::Current => &mut self.result,
             InsertTarget::Parent(idx) => &mut self.parent_stack[idx].result,
@@ -992,10 +993,16 @@ impl<'a> ParseContext<'a> {
                         });
                     }
                 } else {
-                    // For scalar args, keep the latest value.
-                    entry.insert(value);
+                    duplicate_non_multiple = true;
                 }
             }
+        }
+
+        if duplicate_non_multiple {
+            self.emit_error(format!(
+                "argument --{} was provided multiple times, but only one value is allowed",
+                name.to_kebab_case()
+            ));
         }
     }
 
