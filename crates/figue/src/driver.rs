@@ -23,6 +23,7 @@ use std::string::String;
 use std::vec::Vec;
 
 use crate::builder::Config;
+use crate::color::should_use_color;
 use crate::completions::{Shell, generate_completions_for_shape};
 use crate::config_value::ConfigValue;
 use crate::config_value_parser::{fill_defaults_from_schema, from_config_value};
@@ -32,7 +33,9 @@ use crate::env_subst::{EnvSubstError, RealEnv, substitute_env_vars};
 use crate::help::generate_help_for_subcommand;
 use crate::layers::{cli::parse_cli, env::parse_env, file::parse_file};
 use crate::merge::merge_layers;
-use crate::missing::{collect_missing_fields, format_missing_fields_summary};
+use crate::missing::{
+    build_corrected_command_diagnostics, collect_missing_fields, format_missing_fields_summary,
+};
 use crate::path::Path;
 use crate::provenance::{FileResolution, Override, Provenance};
 use crate::span::Span;
@@ -150,19 +153,19 @@ impl<T: Facet<'static>> Driver<T> {
         let mut file_resolution = None;
 
         // Get CLI args source for Ariadne error display
+        // None means no arguments were provided (used for better error formatting)
         let cli_args_source = self
             .config
             .cli_config
             .as_ref()
             .map(|c| {
                 let args = c.resolve_args().join(" ");
-                if args.is_empty() {
-                    "<no arguments>".to_string()
-                } else {
-                    args
-                }
+                if args.is_empty() { None } else { Some(args) }
             })
-            .unwrap_or_else(|| "<no arguments>".to_string());
+            .unwrap_or(None);
+
+        // For Ariadne display, we need a string (use placeholder if empty)
+        let cli_args_display = cli_args_source.as_deref().unwrap_or("<no arguments>");
 
         // Phase 1: Parse each layer
         // Priority order (lowest to highest): defaults < file < env < cli
@@ -289,7 +292,7 @@ impl<T: Facet<'static>> Driver<T> {
                     layers,
                     file_resolution,
                     overrides: Vec::new(),
-                    cli_args_source,
+                    cli_args_source: cli_args_display.to_string(),
                     source_name: "<cli>".to_string(),
                 }),
             });
@@ -334,6 +337,7 @@ impl<T: Facet<'static>> Driver<T> {
                 report: Box::new(DriverReport {
                     diagnostics: vec![Diagnostic {
                         message,
+                        label: None,
                         path: None,
                         span: None,
                         severity: Severity::Error,
@@ -341,7 +345,7 @@ impl<T: Facet<'static>> Driver<T> {
                     layers,
                     file_resolution,
                     overrides,
-                    cli_args_source,
+                    cli_args_source: cli_args_display.to_string(),
                     source_name: "<cli>".to_string(),
                 }),
             });
@@ -415,67 +419,108 @@ impl<T: Facet<'static>> Driver<T> {
                 return DriverOutcome::err(DriverError::Help { text: help });
             }
 
-            // Show dump with missing field markers (includes Sources header)
-            let mut dump_buf = Vec::new();
-            let resolution = file_resolution.as_ref().cloned().unwrap_or_default();
-            dump_config_with_schema(
-                &mut dump_buf,
-                &value_with_defaults,
-                &resolution,
-                &self.config.schema,
-            );
-            let dump =
-                String::from_utf8(dump_buf).unwrap_or_else(|_| "error rendering dump".into());
-
-            // Build error message with both missing fields and unknown keys
-            let mut message_parts = Vec::new();
-
-            if has_unknown {
-                message_parts.push("Unknown configuration keys:".to_string());
-            }
-            if has_missing {
-                message_parts.push("Missing required fields:".to_string());
-            }
-
-            let header = message_parts.join(" / ");
-
-            // Format the summary of missing fields
-            let missing_summary = if has_missing {
-                format!(
-                    "\nMissing:\n{}",
-                    format_missing_fields_summary(&missing_fields)
-                )
-            } else {
-                String::new()
-            };
-
-            // Format the summary of unknown keys with suggestions
-            let unknown_summary = if has_unknown {
-                let config_schema = self.config.schema.config();
-                let unknown_list: Vec<String> = unknown_keys
+            // Check if all missing fields are simple CLI arguments (not config fields)
+            // Use the proper kind field to distinguish between CLI args and config fields
+            let all_cli_missing = has_missing
+                && !has_unknown
+                && missing_fields
                     .iter()
-                    .map(|uk| {
-                        let source = uk.provenance.source_description();
-                        let suggestion = config_schema
-                            .map(|cs| crate::suggest::suggest_config_path(cs, &uk.key))
-                            .unwrap_or_default();
-                        format!("  {} (from {}){}", uk.key.join("."), source, suggestion)
-                    })
-                    .collect();
-                format!("\nUnknown keys:\n{}", unknown_list.join("\n"))
-            } else {
-                String::new()
-            };
+                    .all(|f| matches!(f.kind, crate::missing::MissingFieldKind::CliArg));
 
-            let message = format!(
-                "{}\n\n{}{}{}\nRun with --help for usage information.",
-                header, dump, missing_summary, unknown_summary
-            );
+            if all_cli_missing {
+                // Use corrected command as source with proper diagnostics
+                let mut corrected = build_corrected_command_diagnostics(
+                    &missing_fields,
+                    cli_args_source.as_deref(),
+                );
+
+                // Add help hint if the schema has a help field
+                if self.config.schema.special().help.is_some() {
+                    corrected.diagnostics.push(Diagnostic {
+                        message: "Run with --help for usage information.".to_string(),
+                        label: None,
+                        path: None,
+                        span: None,
+                        severity: Severity::Note,
+                    });
+                }
+
+                return DriverOutcome::err(DriverError::Failed {
+                    report: Box::new(DriverReport {
+                        diagnostics: corrected.diagnostics,
+                        layers,
+                        file_resolution,
+                        overrides,
+                        cli_args_source: corrected.corrected_source,
+                        source_name: "<suggestion>".to_string(),
+                    }),
+                });
+            }
+
+            let message = {
+                // Use detailed format with config dump
+                let mut dump_buf = Vec::new();
+                let resolution = file_resolution.as_ref().cloned().unwrap_or_default();
+                dump_config_with_schema(
+                    &mut dump_buf,
+                    &value_with_defaults,
+                    &resolution,
+                    &self.config.schema,
+                );
+                let dump =
+                    String::from_utf8(dump_buf).unwrap_or_else(|_| "error rendering dump".into());
+
+                // Build error message with both missing fields and unknown keys
+                let mut message_parts = Vec::new();
+
+                if has_unknown {
+                    message_parts.push("Unknown configuration keys:".to_string());
+                }
+                if has_missing {
+                    message_parts.push("Missing required fields:".to_string());
+                }
+
+                let header = message_parts.join(" / ");
+
+                // Format the summary of missing fields
+                let missing_summary = if has_missing {
+                    format!(
+                        "\nMissing:\n{}",
+                        format_missing_fields_summary(&missing_fields)
+                    )
+                } else {
+                    String::new()
+                };
+
+                // Format the summary of unknown keys with suggestions
+                let unknown_summary = if has_unknown {
+                    let config_schema = self.config.schema.config();
+                    let unknown_list: Vec<String> = unknown_keys
+                        .iter()
+                        .map(|uk| {
+                            let source = uk.provenance.source_description();
+                            let suggestion = config_schema
+                                .map(|cs| crate::suggest::suggest_config_path(cs, &uk.key))
+                                .unwrap_or_default();
+                            format!("  {} (from {}){}", uk.key.join("."), source, suggestion)
+                        })
+                        .collect();
+                    format!("\nUnknown keys:\n{}", unknown_list.join("\n"))
+                } else {
+                    String::new()
+                };
+
+                format!(
+                    "{}\n\n{}{}{}\nRun with --help for usage information.",
+                    header, dump, missing_summary, unknown_summary
+                )
+            };
 
             return DriverOutcome::err(DriverError::Failed {
                 report: Box::new(DriverReport {
                     diagnostics: vec![Diagnostic {
                         message,
+                        label: None,
                         path: None,
                         span: None,
                         severity: Severity::Error,
@@ -483,7 +528,7 @@ impl<T: Facet<'static>> Driver<T> {
                     layers,
                     file_resolution,
                     overrides,
-                    cli_args_source,
+                    cli_args_source: cli_args_display.to_string(),
                     source_name: "<cli>".to_string(),
                 }),
             });
@@ -507,19 +552,20 @@ impl<T: Facet<'static>> Driver<T> {
                             entry.real_span.len as usize,
                         );
                         let (name, contents) =
-                            get_source_for_provenance(&entry.provenance, &cli_args_source, &layers);
+                            get_source_for_provenance(&entry.provenance, cli_args_display, &layers);
                         (Some(real_span), name, contents)
                     } else {
-                        (None, "<unknown>".to_string(), cli_args_source.clone())
+                        (None, "<unknown>".to_string(), cli_args_display.to_string())
                     }
                 } else {
-                    (None, "<unknown>".to_string(), cli_args_source.clone())
+                    (None, "<unknown>".to_string(), cli_args_display.to_string())
                 };
 
                 return DriverOutcome::err(DriverError::Failed {
                     report: Box::new(DriverReport {
                         diagnostics: vec![Diagnostic {
                             message: e.to_string(),
+                            label: None,
                             path: None,
                             span,
                             severity: Severity::Error,
@@ -541,7 +587,7 @@ impl<T: Facet<'static>> Driver<T> {
                 layers,
                 file_resolution,
                 overrides,
-                cli_args_source,
+                cli_args_source: cli_args_display.to_string(),
                 source_name: "<cli>".to_string(),
             },
             merged_config: value_with_virtual_spans,
@@ -553,11 +599,11 @@ impl<T: Facet<'static>> Driver<T> {
 /// Get the source name and contents for a provenance.
 fn get_source_for_provenance(
     provenance: &Provenance,
-    cli_args_source: &str,
+    cli_args_display: &str,
     layers: &ConfigLayers,
 ) -> (String, String) {
     match provenance {
-        Provenance::Cli { .. } => ("<cli>".to_string(), cli_args_source.to_string()),
+        Provenance::Cli { .. } => ("<cli>".to_string(), cli_args_display.to_string()),
         Provenance::Env { .. } => {
             // Use the virtual env document from the env layer
             let source_text = layers.env.source_text.as_ref().cloned().unwrap_or_default();
@@ -568,21 +614,31 @@ fn get_source_for_provenance(
     }
 }
 
-/// Opaque result type for driver operations.
+/// The result of running the figue driver — either a parsed value or an early exit.
 ///
-/// This type intentionally does NOT implement `Try`, so you cannot use `?` on it directly.
-/// This prevents accidentally propagating help/version/completions as errors (which would
-/// cause exit code 1 instead of 0).
+/// # Why this type exists
+///
+/// When a CLI user passes `--help` or `--version`, the program should print the
+/// relevant text and exit with code 0 (success). But these cases flow through the
+/// error path of the driver, since no config value `T` was produced. If `DriverOutcome`
+/// were just a `Result`, calling `.unwrap()` would panic on `--help`, and using `?`
+/// would propagate it as an error (exit code 1 instead of 0).
+///
+/// `DriverOutcome` solves this by providing an [`.unwrap()`](Self::unwrap) method that
+/// does the right thing for every case:
+///
+/// - Parsed successfully → returns `T`
+/// - `--help` / `--version` / `--completions` → prints to stdout, exits with code 0
+/// - Parse error → prints diagnostics to stderr, exits with code 1
+///
+/// This type intentionally does NOT implement `Try`, so you cannot use `?` on it
+/// accidentally.
 ///
 /// # Usage
 ///
-/// Use one of the following methods to extract the value:
-/// - [`.unwrap()`](Self::unwrap) - handles exits correctly, returns `T` (recommended for most cases)
-/// - [`.into_result()`](Self::into_result) - for advanced users who want to handle everything themselves
+/// For most CLI programs, just call `.unwrap()`:
 ///
-/// # Example
-///
-/// ```rust
+/// ```rust,no_run
 /// use facet::Facet;
 /// use figue::{self as args, FigueBuiltins};
 ///
@@ -595,13 +651,41 @@ fn get_source_for_provenance(
 ///     builtins: FigueBuiltins,
 /// }
 ///
-/// // Using unwrap() - recommended for simple cases
-/// let args: Args = figue::from_slice(&["input.txt"]).unwrap();
-/// assert_eq!(args.file, "input.txt");
+/// fn main() {
+///     // If the user passes --help, this prints help and exits with code 0.
+///     // If the user passes invalid args, this prints an error and exits with code 1.
+///     // Otherwise, it returns the parsed Args.
+///     let args: Args = figue::from_std_args().unwrap();
+///     println!("Processing: {}", args.file);
+/// }
+/// ```
 ///
-/// // Using into_result() - for custom error handling
-/// let result = figue::from_slice::<Args>(&["--help"]).into_result();
-/// assert!(result.is_err());
+/// For tests or custom handling, use [`.into_result()`](Self::into_result) to get a
+/// `Result<DriverOutput<T>, DriverError>`:
+///
+/// ```rust
+/// use facet::Facet;
+/// use figue::{self as args, FigueBuiltins, DriverError};
+///
+/// #[derive(Facet)]
+/// struct Args {
+///     #[facet(args::positional, default)]
+///     file: Option<String>,
+///
+///     #[facet(flatten)]
+///     builtins: FigueBuiltins,
+/// }
+///
+/// // --help produces a DriverError::Help (exit code 0, not a "real" error)
+/// let outcome = figue::from_slice::<Args>(&["--help"]);
+/// let err = outcome.unwrap_err();
+/// assert!(err.is_help());
+/// assert_eq!(err.exit_code(), 0);
+///
+/// // Successful parse returns DriverOutput containing the value
+/// let outcome = figue::from_slice::<Args>(&["input.txt"]);
+/// let output = outcome.into_result().unwrap();
+/// assert_eq!(output.value.file.as_deref(), Some("input.txt"));
 /// ```
 #[must_use = "this `DriverOutcome` may contain a help/version request that should be handled"]
 pub struct DriverOutcome<T>(Result<DriverOutput<T>, DriverError>);
@@ -631,9 +715,12 @@ impl<T> DriverOutcome<T> {
 
     /// Convert to a standard `Result` for manual handling.
     ///
-    /// **Warning**: If you use `?` on this result and the error is `Help`, `Version`,
-    /// or `Completions`, Rust's default error handling will exit with code 1 instead of 0.
-    /// Consider using `.unwrap()` instead for correct exit behavior.
+    /// Use this when you need to inspect the error yourself (e.g., in tests, or to
+    /// implement custom exit behavior). For most CLI programs, prefer
+    /// [`.unwrap()`](Self::unwrap) instead.
+    ///
+    /// **Warning**: Don't blindly use `?` on this result — early exits like `Help` and
+    /// `Version` will propagate as errors and cause exit code 1 instead of 0.
     pub fn into_result(self) -> Result<DriverOutput<T>, DriverError> {
         self.0
     }
@@ -648,14 +735,18 @@ impl<T> DriverOutcome<T> {
         self.0.is_err()
     }
 
-    /// Get the value, or print output and exit.
+    /// Get the parsed value, handling all early-exit cases automatically.
     ///
-    /// This is the recommended way to handle `DriverOutcome` in most applications.
-    /// It correctly handles all cases:
+    /// This is the primary way to use figue. It does exactly what a well-behaved
+    /// CLI should do:
     ///
-    /// - **On success**: prints warnings to stderr, returns the parsed value
-    /// - **On help/completions/version**: prints to stdout, exits with code 0
-    /// - **On error**: prints diagnostics to stderr, exits with code 1
+    /// | Case | Behavior |
+    /// |------|----------|
+    /// | Parse succeeded | Prints warnings to stderr, returns `T` |
+    /// | `--help` passed | Prints help to stdout, exits with code 0 |
+    /// | `--version` passed | Prints version to stdout, exits with code 0 |
+    /// | `--completions` passed | Prints shell script to stdout, exits with code 0 |
+    /// | Parse failed | Prints diagnostics to stderr, exits with code 1 |
     ///
     /// # Example
     ///
@@ -672,12 +763,10 @@ impl<T> DriverOutcome<T> {
     ///     builtins: FigueBuiltins,
     /// }
     ///
-    /// // This will:
-    /// // - Print help and exit(0) if --help is passed
-    /// // - Print version and exit(0) if --version is passed
-    /// // - Print error and exit(1) if args are invalid
-    /// // - Return the Args if everything is OK
+    /// // In your main():
     /// let args: Args = figue::from_std_args().unwrap();
+    /// // If we get here, args were parsed successfully.
+    /// // --help and --version already exited before this line.
     /// println!("Processing: {}", args.file);
     /// ```
     pub fn unwrap(self) -> T {
@@ -881,13 +970,13 @@ impl ariadne::Cache<()> for NamedSource {
 impl DriverReport {
     /// Render the report using Ariadne for pretty error display.
     pub fn render_pretty(&self) -> String {
-        use ariadne::{Color, Label, Report, ReportKind, Source};
+        use ariadne::{Color, Config, Label, Report, ReportKind, Source};
 
         if self.diagnostics.is_empty() {
             return String::new();
         }
 
-        let mut output = Vec::new();
+        let mut output = Vec::with_capacity(128);
         let mut cache = NamedSource {
             name: self.source_name.clone(),
             source: Source::from(self.cli_args_source.clone()),
@@ -897,6 +986,18 @@ impl DriverReport {
             // For diagnostics without a span, just print the message directly
             // (e.g., missing required fields error doesn't point to a specific location)
             if diagnostic.span.is_none() {
+                // If message starts with "Error:" it's already a formatted report (e.g., from Ariadne)
+                // Just output it as-is without adding another prefix
+                if diagnostic.message.starts_with("Error:")
+                    || diagnostic.message.starts_with("Warning:")
+                    || diagnostic.message.starts_with("Note:")
+                {
+                    output.extend_from_slice(diagnostic.message.as_bytes());
+                    output.push(b'\n');
+                    continue;
+                }
+
+                // Otherwise add the appropriate prefix
                 let prefix = match diagnostic.severity {
                     Severity::Error => "Error: ",
                     Severity::Warning => "Warning: ",
@@ -919,19 +1020,21 @@ impl DriverReport {
                 Severity::Note => ReportKind::Advice,
             };
 
-            let color = match diagnostic.severity {
-                Severity::Error => Color::Red,
-                Severity::Warning => Color::Yellow,
-                Severity::Note => Color::Cyan,
-            };
+            let label_message = diagnostic.label.as_deref().unwrap_or(&diagnostic.message);
+            let mut label = Label::new(span.clone()).with_message(label_message);
+            if should_use_color() {
+                let color = match diagnostic.severity {
+                    Severity::Error => Color::Red,
+                    Severity::Warning => Color::Yellow,
+                    Severity::Note => Color::Cyan,
+                };
+                label = label.with_color(color);
+            }
 
             let report = Report::build(report_kind, span.clone())
+                .with_config(Config::default().with_color(should_use_color()))
                 .with_message(&diagnostic.message)
-                .with_label(
-                    Label::new(span)
-                        .with_message(&diagnostic.message)
-                        .with_color(color),
-                )
+                .with_label(label)
                 .finish();
 
             report.write(&mut cache, &mut output).ok();
@@ -961,6 +1064,8 @@ impl core::fmt::Debug for DriverReport {
 pub struct Diagnostic {
     /// Human-readable message.
     pub message: String,
+    /// Optional label message for the span (if different from message).
+    pub label: Option<String>,
     /// Optional path within the schema or config.
     pub path: Option<Path>,
     /// Optional byte span within a formatted shape or source file.
@@ -1013,22 +1118,33 @@ fn extract_shell_from_value(value: &ConfigValue) -> Option<Shell> {
     }
 }
 
-/// Error returned by the driver.
+/// Reason the driver did not produce a parsed value.
 ///
-/// Not all variants are "errors" in the traditional sense - [`Help`](Self::Help),
-/// [`Completions`](Self::Completions), and [`Version`](Self::Version) are successful
-/// operations that just don't produce a config value.
+/// This enum covers two distinct cases:
+///
+/// - **Early exits** ([`Help`](Self::Help), [`Version`](Self::Version),
+///   [`Completions`](Self::Completions)) — the user asked for something other than
+///   running the program. These have exit code 0 and are "errors" only in the sense
+///   that no `T` was produced.
+///
+/// - **Actual errors** ([`Failed`](Self::Failed), [`Builder`](Self::Builder),
+///   [`EnvSubst`](Self::EnvSubst)) — something went wrong. These have exit code 1.
+///
+/// Most programs don't need to inspect this type at all — calling
+/// [`DriverOutcome::unwrap()`] handles everything correctly. This type is useful
+/// when you want to customize behavior, e.g. in tests or in programs that embed
+/// figue's parsing in a larger framework.
 ///
 /// # Exit Codes
 ///
-/// | Variant | Exit Code | Meaning |
-/// |---------|-----------|---------|
-/// | `Help` | 0 | User requested help |
-/// | `Version` | 0 | User requested version |
-/// | `Completions` | 0 | User requested shell completions |
-/// | `Failed` | 1 | Parsing or validation error |
-/// | `Builder` | 1 | Schema or setup error |
-/// | `EnvSubst` | 1 | Environment variable substitution error |
+/// | Variant | Exit Code | Kind |
+/// |---------|-----------|------|
+/// | `Help` | 0 | Early exit |
+/// | `Version` | 0 | Early exit |
+/// | `Completions` | 0 | Early exit |
+/// | `Failed` | 1 | Error |
+/// | `Builder` | 1 | Error |
+/// | `EnvSubst` | 1 | Error |
 ///
 /// # Example
 ///
@@ -1045,11 +1161,19 @@ fn extract_shell_from_value(value: &ConfigValue) -> Option<Shell> {
 ///     builtins: FigueBuiltins,
 /// }
 ///
-/// let result = figue::from_slice::<Args>(&["--help"]).into_result();
-/// match result {
+/// // --help is an early exit, not an error
+/// let err = figue::from_slice::<Args>(&["--help"]).unwrap_err();
+/// assert!(err.is_success());
+/// assert_eq!(err.exit_code(), 0);
+///
+/// // Pattern matching for custom handling:
+/// match figue::from_slice::<Args>(&["--help"]).into_result() {
+///     Ok(output) => {
+///         // use output.value
+///     }
 ///     Err(DriverError::Help { text }) => {
 ///         assert!(text.contains("--help"));
-///         // In a real app: print text and exit(0)
+///         // print text and exit(0)
 ///     }
 ///     Err(DriverError::Version { text }) => {
 ///         // print text and exit(0)
@@ -1059,9 +1183,6 @@ fn extract_shell_from_value(value: &ConfigValue) -> Option<Shell> {
 ///     }
 ///     Err(e) => {
 ///         // other error, exit(1)
-///     }
-///     Ok(output) => {
-///         // success, use output.value
 ///     }
 /// }
 /// ```

@@ -325,6 +325,7 @@ impl<'a> FileParseContext<'a> {
     fn emit_error(&mut self, message: String) {
         self.early_diagnostics.push(Diagnostic {
             message,
+            label: None,
             path: None,
             span: None,
             severity: Severity::Error,
@@ -693,7 +694,7 @@ mod tests {
     fn test_format_registry_with_defaults() {
         let registry = FormatRegistry::with_defaults();
         assert!(registry.find_by_extension("json").is_some());
-        assert!(registry.find_by_extension("JSON").is_some()); // case insensitive
+        assert!(registry.find_by_extension("JSON").is_some()); // case-insensitive
         assert!(registry.find_by_extension("toml").is_none());
     }
 

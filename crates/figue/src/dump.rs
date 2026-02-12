@@ -7,7 +7,8 @@ use crate::{
     provenance::{FilePathStatus, FileResolution, Provenance},
     schema::{ConfigValueSchema, Schema},
 };
-use owo_colors::OwoColorize;
+use owo_colors::Stream::Stdout;
+use owo_colors::{OwoColorize, Style};
 use std::collections::HashMap;
 use std::io::Write;
 use unicode_width::UnicodeWidthStr;
@@ -43,7 +44,11 @@ impl DumpEntry {
         Self {
             key: key.into(),
             value: String::new(), // Empty - will be filled with dots
-            provenance: format!("{} {}", "⨯".red(), "MISSING".red().bold()),
+            provenance: format!(
+                "{} {}",
+                "⨯".if_supports_color(Stdout, |text| text.red()),
+                "MISSING".if_supports_color(Stdout, |text| text.style(Style::new().red().bold()))
+            ),
             children: Vec::new(),
         }
     }
@@ -51,8 +56,12 @@ impl DumpEntry {
     fn default_value(key: impl Into<String>) -> Self {
         Self::leaf(
             key,
-            "<default>".bright_black().to_string(),
-            "DEFAULT".bright_black().to_string(),
+            "<default>"
+                .if_supports_color(Stdout, |text| text.bright_black())
+                .to_string(),
+            "DEFAULT"
+                .if_supports_color(Stdout, |text| text.bright_black())
+                .to_string(),
         )
     }
 
@@ -118,7 +127,7 @@ pub(crate) fn dump_config_with_schema(
         writeln!(
             w,
             "Some values were truncated. To show full values, rerun with {}=1",
-            "FACET_ARGS_BLAST_IT".yellow()
+            "FACET_ARGS_BLAST_IT".if_supports_color(Stdout, |text| text.yellow())
         )
         .ok();
     }
@@ -181,12 +190,19 @@ fn write_sources_header(w: &mut impl Write, file_resolution: &FileResolution, sc
             };
 
             let colored_path = match path_info.status {
-                FilePathStatus::Picked => path_str.magenta().to_string(),
-                _ => path_str.dimmed().to_string(),
+                FilePathStatus::Picked => path_str
+                    .if_supports_color(Stdout, |text| text.magenta())
+                    .to_string(),
+                _ => path_str
+                    .if_supports_color(Stdout, |text| text.dimmed())
+                    .to_string(),
             };
+
             let colored_status = match path_info.status {
                 FilePathStatus::Picked => status_label.to_string(),
-                _ => status_label.dimmed().to_string(),
+                _ => status_label
+                    .if_supports_color(Stdout, |text| text.dimmed())
+                    .to_string(),
             };
 
             writeln!(
@@ -207,7 +223,13 @@ fn write_sources_header(w: &mut impl Write, file_resolution: &FileResolution, sc
         current_source += 1;
         let is_last_source = current_source == sources_count;
         let branch = if is_last_source { "└─ " } else { "├─ " };
-        writeln!(w, "{}env {}", branch, format!("${}__*", prefix).yellow()).ok();
+        writeln!(
+            w,
+            "{}env {}",
+            branch,
+            format!("${}__*", prefix).if_supports_color(Stdout, |text| text.yellow())
+        )
+        .ok();
     }
 
     {
@@ -218,7 +240,7 @@ fn write_sources_header(w: &mut impl Write, file_resolution: &FileResolution, sc
             w,
             "{}cli {}",
             branch,
-            format!("--{}.*", config_field_name).cyan()
+            format!("--{}.*", config_field_name).if_supports_color(Stdout, |text| text.cyan())
         )
         .ok();
     }
@@ -450,37 +472,51 @@ fn build_entry_from_schema(
         (ConfigValue::String(sourced), ConfigValueSchema::Leaf(_)) => {
             let formatted = if is_sensitive {
                 format!("🔒 [REDACTED ({} bytes)]", sourced.value.len())
-                    .bright_magenta()
+                    .if_supports_color(Stdout, |text| text.bright_magenta())
                     .to_string()
             } else {
                 let escaped = sourced.value.replace('\n', "↵");
                 let (truncated, _) = truncate_middle(&escaped, opts.max_string_length);
-                truncated.green().to_string()
+                truncated
+                    .if_supports_color(Stdout, |text| text.green())
+                    .to_string()
             };
             DumpEntry::leaf(key, formatted, format_provenance(&sourced.provenance))
         }
         (ConfigValue::Integer(sourced), ConfigValueSchema::Leaf(_)) => DumpEntry::leaf(
             key,
-            sourced.value.to_string().blue().to_string(),
+            sourced
+                .value
+                .if_supports_color(Stdout, |value| value.blue())
+                .to_string(),
             format_provenance(&sourced.provenance),
         ),
         (ConfigValue::Float(sourced), ConfigValueSchema::Leaf(_)) => DumpEntry::leaf(
             key,
-            sourced.value.to_string().bright_blue().to_string(),
+            sourced
+                .value
+                .if_supports_color(Stdout, |value| value.bright_blue())
+                .to_string(),
             format_provenance(&sourced.provenance),
         ),
         (ConfigValue::Bool(sourced), ConfigValueSchema::Leaf(_)) => DumpEntry::leaf(
             key,
             if sourced.value {
-                "true".green().to_string()
+                "true"
+                    .if_supports_color(Stdout, |text| text.green())
+                    .to_string()
             } else {
-                "false".red().to_string()
+                "false"
+                    .if_supports_color(Stdout, |text| text.red())
+                    .to_string()
             },
             format_provenance(&sourced.provenance),
         ),
         (ConfigValue::Null(sourced), ConfigValueSchema::Leaf(_)) => DumpEntry::leaf(
             key,
-            "null".bright_black().to_string(),
+            "null"
+                .if_supports_color(Stdout, |text| text.bright_black())
+                .to_string(),
             format_provenance(&sourced.provenance),
         ),
 
@@ -511,37 +547,51 @@ fn build_leaf_entry(
         ConfigValue::String(sourced) => {
             let formatted = if is_sensitive {
                 format!("🔒 [REDACTED ({} bytes)]", sourced.value.len())
-                    .bright_magenta()
+                    .if_supports_color(Stdout, |text| text.bright_magenta())
                     .to_string()
             } else {
                 let escaped = sourced.value.replace('\n', "↵");
                 let (truncated, _) = truncate_middle(&escaped, opts.max_string_length);
-                truncated.green().to_string()
+                truncated
+                    .if_supports_color(Stdout, |text| text.green())
+                    .to_string()
             };
             DumpEntry::leaf(key, formatted, format_provenance(&sourced.provenance))
         }
         ConfigValue::Integer(sourced) => DumpEntry::leaf(
             key,
-            sourced.value.to_string().blue().to_string(),
+            sourced
+                .value
+                .if_supports_color(Stdout, |text| text.blue())
+                .to_string(),
             format_provenance(&sourced.provenance),
         ),
         ConfigValue::Float(sourced) => DumpEntry::leaf(
             key,
-            sourced.value.to_string().bright_blue().to_string(),
+            sourced
+                .value
+                .if_supports_color(Stdout, |text| text.bright_blue())
+                .to_string(),
             format_provenance(&sourced.provenance),
         ),
         ConfigValue::Bool(sourced) => DumpEntry::leaf(
             key,
             if sourced.value {
-                "true".green().to_string()
+                "true"
+                    .if_supports_color(Stdout, |text| text.green())
+                    .to_string()
             } else {
-                "false".red().to_string()
+                "false"
+                    .if_supports_color(Stdout, |text| text.red())
+                    .to_string()
             },
             format_provenance(&sourced.provenance),
         ),
         ConfigValue::Null(sourced) => DumpEntry::leaf(
             key,
-            "null".bright_black().to_string(),
+            "null"
+                .if_supports_color(Stdout, |text| text.bright_black())
+                .to_string(),
             format_provenance(&sourced.provenance),
         ),
         ConfigValue::Object(sourced) => {
@@ -669,9 +719,9 @@ fn render_entries_with_prefix(
                             "{}{}{} {}{} {}",
                             full_prefix,
                             entry.key,
-                            key_pad.bright_black(),
+                            key_pad.if_supports_color(Stdout, |text| text.bright_black()),
                             line,
-                            val_pad.bright_black(),
+                            val_pad.if_supports_color(Stdout, |text| text.bright_black()),
                             entry.provenance,
                         )
                         .ok();
@@ -718,17 +768,25 @@ fn render_entries_with_prefix(
 
 fn format_provenance(prov: &Option<Provenance>) -> String {
     match prov {
-        Some(Provenance::Cli { arg, .. }) => arg.cyan().to_string(),
-        Some(Provenance::Env { var, .. }) => format!("${}", var).yellow().to_string(),
+        Some(Provenance::Cli { arg, .. }) => arg
+            .if_supports_color(Stdout, |text| text.cyan())
+            .to_string(),
+        Some(Provenance::Env { var, .. }) => format!("${}", var)
+            .if_supports_color(Stdout, |text| text.yellow())
+            .to_string(),
         Some(Provenance::File { file, offset, .. }) => {
             let line_num = calculate_line_number(&file.contents, *offset);
             let filename = std::path::Path::new(file.path.as_str())
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or(file.path.as_str());
-            format!("{}:{}", filename, line_num).magenta().to_string()
+            format!("{}:{}", filename, line_num)
+                .if_supports_color(Stdout, |text| text.magenta())
+                .to_string()
         }
-        Some(Provenance::Default) => "DEFAULT".bright_black().to_string(),
+        Some(Provenance::Default) => "DEFAULT"
+            .if_supports_color(Stdout, |text| text.bright_black())
+            .to_string(),
         None => String::new(),
     }
 }

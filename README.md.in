@@ -2,10 +2,12 @@
 
 [![crates.io](https://img.shields.io/crates/v/figue.svg)](https://crates.io/crates/figue)
 [![documentation](https://docs.rs/figue/badge.svg)](https://docs.rs/figue)
-[![MIT/Apache-2.0 licensed](https://img.shields.io/crates/l/figue.svg)](./LICENSE)
+[![MIT/Apache-2.0 licensed](https://img.shields.io/crates/l/figue.svg)](LICENSE-MIT)
 
-Provides configuration parsing from CLI arguments, environment variables, and config files,
-a bit like [figment](https://docs.rs/figment/latest/figment/) but based on facet reflection:
+figue (pronounced 'fig', like the fruit) provides configuration parsing from
+CLI arguments, environment variables, and config files, a bit like
+[figment](https://docs.rs/figment/latest/figment/) but based on facet
+reflection:
 
 ```rust
 use facet_pretty::FacetPretty;
@@ -32,6 +34,14 @@ Ok(())
 ```
 
 The entry point of figue is [`builder`] — let yourself be guided from there.
+
+## Color
+
+figue uses [facet-color](https://docs.rs/facet-color) for coloring output.
+
+## Contributing
+
+Run `hooks/install.sh` to install pre-commit and pre-push hooks.
 
 ## Sponsors
 

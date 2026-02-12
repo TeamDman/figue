@@ -272,6 +272,9 @@ pub struct ArgSchema {
     /// Value shape (including Option/Vec wrappers).
     value: ValueSchema,
 
+    /// Type description for help messages.
+    label: Option<String>,
+
     /// Whether the argument is required on the CLI.
     /// Set when the field is non-optional, has no default, is not a bool flag,
     /// and is not an optional subcommand.
@@ -624,6 +627,11 @@ impl ArgSchema {
         &self.docs
     }
 
+    /// Get the custom type description for this argument, if any.
+    pub fn label(&self) -> Option<&str> {
+        self.label.as_deref()
+    }
+
     /// Get the default value for this argument, if any.
     ///
     /// This returns the field's default from `#[facet(default)]` or `#[facet(default = ...)]`,
@@ -791,7 +799,7 @@ impl ValueSchema {
         }
     }
 
-    /// Unwrap Option wrapper if present, returning the inner schema.
+    /// Unwrap [Option] wrapper if present, returning the inner schema.
     pub fn inner_if_option(&self) -> &ValueSchema {
         match self {
             ValueSchema::Option { value, .. } => value.as_ref(),
@@ -800,7 +808,7 @@ impl ValueSchema {
     }
 
     /// Get the type identifier for display purposes (e.g., "STRING", "U16").
-    /// Returns the innermost type's identifier, unwrapping Option/Vec.
+    /// Returns the innermost type's identifier, unwrapping [Option]/[Vec].
     pub fn type_identifier(&self) -> &'static str {
         match self {
             ValueSchema::Leaf(leaf) => leaf.shape.type_identifier,
@@ -813,6 +821,18 @@ impl ValueSchema {
     /// Check if this is an Option type.
     pub fn is_option(&self) -> bool {
         matches!(self, ValueSchema::Option { .. })
+    }
+
+    /// Get enum variants if this is an enum type.
+    /// Returns [None] for non-enum types.
+    pub fn enum_variants(&self) -> Option<&[String]> {
+        match self {
+            ValueSchema::Leaf(LeafSchema {
+                kind: LeafKind::Enum { variants },
+                ..
+            }) => Some(variants.as_slice()),
+            _ => None,
+        }
     }
 }
 

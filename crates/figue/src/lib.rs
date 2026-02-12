@@ -163,6 +163,7 @@ use figue_attrs as args;
 mod macros;
 
 pub(crate) mod builder;
+pub(crate) mod color;
 pub(crate) mod completions;
 pub(crate) mod config_format;
 pub(crate) mod config_value;
@@ -193,8 +194,8 @@ use facet_core::Facet;
 // PUBLIC INTERFACE
 // ==========================================
 
+pub use crate::completions::Shell;
 pub use builder::builder;
-pub use completions::{Shell, generate_completions, generate_completions_for_shape};
 pub use config_format::{ConfigFormat, ConfigFormatError, JsonFormat};
 pub use config_value::ConfigValue;
 pub use driver::{Driver, DriverError, DriverOutcome, DriverOutput, DriverReport};
@@ -230,7 +231,7 @@ pub use layers::file::FormatRegistry;
 /// let args: Args = figue::from_std_args().unwrap();
 /// println!("Processing: {}", args.input);
 /// ```
-pub fn from_std_args<T: Facet<'static>>() -> driver::DriverOutcome<T> {
+pub fn from_std_args<T: Facet<'static>>() -> DriverOutcome<T> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     from_slice(&args_ref)
@@ -285,7 +286,7 @@ pub fn from_std_args<T: Facet<'static>>() -> driver::DriverOutcome<T> {
 /// - Unknown flags are provided
 /// - Type conversion fails (e.g., "abc" for a number)
 /// - `--help`, `--version`, or `--completions` is requested (success exit)
-pub fn from_slice<T: Facet<'static>>(args: &[&str]) -> driver::DriverOutcome<T> {
+pub fn from_slice<T: Facet<'static>>(args: &[&str]) -> DriverOutcome<T> {
     use crate::driver::{Driver, DriverError, DriverOutcome};
 
     let config = match builder::<T>() {
@@ -430,7 +431,7 @@ mod tests {
 
     #[test]
     fn test_figue_builtins_in_help() {
-        let help = generate_help::<ArgsWithBuiltins>(&crate::help::HelpConfig::default());
+        let help = generate_help::<ArgsWithBuiltins>(&HelpConfig::default());
         assert!(help.contains("--help"), "help should contain --help");
         assert!(help.contains("-h"), "help should contain -h");
         assert!(help.contains("--version"), "help should contain --version");
@@ -438,6 +439,11 @@ mod tests {
         assert!(
             help.contains("--completions"),
             "help should contain --completions"
+        );
+        assert!(
+            help.contains("<bash,zsh,fish>"),
+            "help should show enum variants for --completions: {}",
+            help
         );
     }
 
