@@ -150,6 +150,23 @@ fn test_duplicate_non_multiple_named_reports_clear_error() {
 }
 
 #[test]
+fn test_duplicate_non_multiple_named_reports_stable_span() {
+    #[derive(Facet, Debug)]
+    struct Args {
+        #[facet(args::named)]
+        port: u16,
+    }
+
+    let err = figue::from_slice::<Args>(&["--port", "1", "--port", "2"]).unwrap_err();
+    let msg = err.to_string();
+
+    println!("{msg}");
+    // The duplicate diagnostic should point at the second provided flag/value pair,
+    // not an end-of-input fallback span.
+    assert!(msg.contains("<cli>:1:10"), "{msg}");
+}
+
+#[test]
 fn test_bool_str_before() {
     #[derive(Facet, Debug)]
     struct Args {

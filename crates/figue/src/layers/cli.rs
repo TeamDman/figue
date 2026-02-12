@@ -271,6 +271,12 @@ impl<'a> ParseContext<'a> {
         facet_reflect::Span::new(base + sub_offset, sub_len)
     }
 
+    fn union_span(a: facet_reflect::Span, b: facet_reflect::Span) -> facet_reflect::Span {
+        let start = (a.offset as usize).min(b.offset as usize);
+        let end = ((a.offset + a.len) as usize).max((b.offset + b.len) as usize);
+        facet_reflect::Span::new(start, end - start)
+    }
+
     fn parse(&mut self) {
         self.parse_level(self.schema.args());
         self.apply_counted_fields();
@@ -616,6 +622,7 @@ impl<'a> ParseContext<'a> {
         inline_value: Option<&str>,
     ) {
         if mode.is_bool {
+            let flag_span = self.current_span();
             // Bool flag: presence means true
             let value = if let Some(v) = inline_value {
                 // --flag=true or --flag=false
@@ -624,7 +631,7 @@ impl<'a> ParseContext<'a> {
                 true
             };
             let prov = Provenance::cli(arg, value.to_string());
-            self.insert_value_to(
+            self.insert_value_to_with_span(
                 target,
                 name,
                 ConfigValue::Bool(Sourced {
@@ -633,6 +640,7 @@ impl<'a> ParseContext<'a> {
                     provenance: Some(prov),
                 }),
                 mode.is_multiple,
+                Some(flag_span),
             );
             self.index += 1;
         } else {
@@ -665,7 +673,14 @@ impl<'a> ParseContext<'a> {
 
             let prov_arg = arg.split('=').next().unwrap_or(arg);
             let value = self.parse_value_string(value_str, prov_arg, value_span);
-            self.insert_value_to(target, name, value, mode.is_multiple);
+            let duplicate_span = Self::union_span(flag_span, value_span);
+            self.insert_value_to_with_span(
+                target,
+                name,
+                value,
+                mode.is_multiple,
+                Some(duplicate_span),
+            );
         }
     }
 
@@ -954,6 +969,17 @@ impl<'a> ParseContext<'a> {
         value: ConfigValue,
         is_multiple: bool,
     ) {
+        self.insert_value_to_with_span(target, name, value, is_multiple, None);
+    }
+
+    fn insert_value_to_with_span(
+        &mut self,
+        target: InsertTarget,
+        name: &str,
+        value: ConfigValue,
+        is_multiple: bool,
+        duplicate_span: Option<facet_reflect::Span>,
+    ) {
         let mut duplicate_non_multiple = false;
         let result_map = match target {
             InsertTarget::Current => &mut self.result,
@@ -999,10 +1025,15 @@ impl<'a> ParseContext<'a> {
         }
 
         if duplicate_non_multiple {
-            self.emit_error(format!(
+            let message = format!(
                 "argument --{} was provided multiple times, but only one value is allowed",
                 name.to_kebab_case()
-            ));
+            );
+            if let Some(span) = duplicate_span {
+                self.emit_error_at(message, span);
+            } else {
+                self.emit_error(message);
+            }
         }
     }
 
