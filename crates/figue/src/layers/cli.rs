@@ -291,6 +291,12 @@ impl<'a> ParseContext<'a> {
         facet_reflect::Span::new(base + sub_offset, sub_len)
     }
 
+    fn union_span(a: facet_reflect::Span, b: facet_reflect::Span) -> facet_reflect::Span {
+        let start = (a.offset as usize).min(b.offset as usize);
+        let end = ((a.offset + a.len) as usize).max((b.offset + b.len) as usize);
+        facet_reflect::Span::new(start, end - start)
+    }
+
     fn parse(&mut self) {
         self.parse_level(self.schema.args());
         self.apply_counted_fields();
@@ -796,7 +802,8 @@ impl<'a> ParseContext<'a> {
         enum_variants: Option<&[String]>,
         inline_value: Option<&str>,
     ) {
-        if mode.is_bool {
+        if is_bool {
+            let flag_span = self.current_span();
             // Bool flag: presence means true
             let value = if let Some(v) = inline_value {
                 // --flag=true or --flag=false
@@ -805,7 +812,7 @@ impl<'a> ParseContext<'a> {
                 true
             };
             let prov = Provenance::cli(arg, value.to_string());
-            self.insert_value_path_to(
+            self.insert_value_path_to_with_span(
                 target,
                 insertion_path,
                 ConfigValue::Bool(Sourced {
@@ -813,7 +820,8 @@ impl<'a> ParseContext<'a> {
                     span: None,
                     provenance: Some(prov),
                 }),
-                mode.is_multiple,
+                is_multiple,
+                Some(flag_span),
             );
             self.index += 1;
         } else {
@@ -878,7 +886,14 @@ impl<'a> ParseContext<'a> {
 
             let prov_arg = arg.split('=').next().unwrap_or(arg);
             let value = self.parse_value_string(value_str, prov_arg, value_span);
-            self.insert_value_path_to(target, insertion_path, value, is_multiple);
+            let duplicate_span = Self::union_span(flag_span, value_span);
+            self.insert_value_path_to_with_span(
+                target,
+                insertion_path,
+                value,
+                is_multiple,
+                Some(duplicate_span),
+            );
         }
     }
 
@@ -1269,13 +1284,37 @@ impl<'a> ParseContext<'a> {
         value: ConfigValue,
         is_multiple: bool,
     ) {
+        self.insert_value_path_to_with_span(target, path, value, is_multiple, None);
+    }
+
+    fn insert_value_path_to_with_span(
+        &mut self,
+        target: InsertTarget,
+        path: &[String],
+        value: ConfigValue,
+        is_multiple: bool,
+        duplicate_span: Option<facet_reflect::Span>,
+    ) {
         let mut duplicate_non_multiple = false;
         let result_map = match target {
             InsertTarget::Current => &mut self.result,
             InsertTarget::Parent(idx) => &mut self.parent_stack[idx].result,
         };
 
-        Self::insert_value_at_path(result_map, path, value, is_multiple);
+        duplicate_non_multiple = Self::insert_value_at_path(result_map, path, value, is_multiple);
+
+        if duplicate_non_multiple {
+            let name = path.last().map(String::as_str).unwrap_or("");
+            let message = format!(
+                "argument --{} was provided multiple times, but only one value is allowed",
+                name.to_kebab_case()
+            );
+            if let Some(span) = duplicate_span {
+                self.emit_error_at(message, span);
+            } else {
+                self.emit_error(message);
+            }
+        }
     }
 
     fn insert_value_at_path(
@@ -1283,9 +1322,9 @@ impl<'a> ParseContext<'a> {
         path: &[String],
         value: ConfigValue,
         is_multiple: bool,
-    ) {
+    ) -> bool {
         let Some((head, tail)) = path.split_first() else {
-            return;
+            return false;
         };
 
         if !tail.is_empty() {
@@ -1294,15 +1333,21 @@ impl<'a> ParseContext<'a> {
                 .or_insert_with(|| ConfigValue::Object(Sourced::new(IndexMap::default())));
             match entry {
                 ConfigValue::Object(sourced) => {
-                    Self::insert_value_at_path(&mut sourced.value, tail, value, is_multiple);
+                    return Self::insert_value_at_path(
+                        &mut sourced.value,
+                        tail,
+                        value,
+                        is_multiple,
+                    );
                 }
                 existing => {
                     let mut nested = IndexMap::default();
-                    Self::insert_value_at_path(&mut nested, tail, value, is_multiple);
+                    let duplicate =
+                        Self::insert_value_at_path(&mut nested, tail, value, is_multiple);
                     *existing = ConfigValue::Object(Sourced::new(nested));
+                    return duplicate;
                 }
             }
-            return;
         }
 
         match result_map.entry(head.clone()) {
@@ -1343,12 +1388,7 @@ impl<'a> ParseContext<'a> {
             }
         }
 
-        if duplicate_non_multiple {
-            self.emit_error(format!(
-                "argument --{} was provided multiple times, but only one value is allowed",
-                name.to_kebab_case()
-            ));
-        }
+        duplicate_non_multiple
     }
 
     /// Check if a value exists at the given insertion path.
