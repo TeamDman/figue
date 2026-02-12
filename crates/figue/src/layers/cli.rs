@@ -170,6 +170,12 @@ enum InsertTarget {
     Parent(usize),
 }
 
+#[derive(Clone, Copy)]
+struct FlagValueMode {
+    is_bool: bool,
+    is_multiple: bool,
+}
+
 /// Result of looking up a flag in parent levels.
 /// Contains owned/copied data to avoid borrow conflicts.
 struct ParentFlagLookup {
@@ -371,8 +377,10 @@ impl<'a> ParseContext<'a> {
                 arg,
                 target,
                 &lookup.effective_name,
-                lookup.is_bool,
-                lookup.is_multiple,
+                FlagValueMode {
+                    is_bool: lookup.is_bool,
+                    is_multiple: lookup.is_multiple,
+                },
                 None, // enum_variants not available for parent lookup
                 inline_value,
             );
@@ -588,8 +596,10 @@ impl<'a> ParseContext<'a> {
             arg,
             InsertTarget::Current,
             name,
-            is_bool,
-            is_multiple,
+            FlagValueMode {
+                is_bool,
+                is_multiple,
+            },
             enum_variants,
             inline_value,
         );
@@ -601,12 +611,11 @@ impl<'a> ParseContext<'a> {
         arg: &str,
         target: InsertTarget,
         name: &str,
-        is_bool: bool,
-        is_multiple: bool,
+        mode: FlagValueMode,
         enum_variants: Option<&[String]>,
         inline_value: Option<&str>,
     ) {
-        if is_bool {
+        if mode.is_bool {
             // Bool flag: presence means true
             let value = if let Some(v) = inline_value {
                 // --flag=true or --flag=false
@@ -623,7 +632,7 @@ impl<'a> ParseContext<'a> {
                     span: None,
                     provenance: Some(prov),
                 }),
-                is_multiple,
+                mode.is_multiple,
             );
             self.index += 1;
         } else {
@@ -656,7 +665,7 @@ impl<'a> ParseContext<'a> {
 
             let prov_arg = arg.split('=').next().unwrap_or(arg);
             let value = self.parse_value_string(value_str, prov_arg, value_span);
-            self.insert_value_to(target, name, value, is_multiple);
+            self.insert_value_to(target, name, value, mode.is_multiple);
         }
     }
 
