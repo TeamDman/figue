@@ -796,7 +796,7 @@ impl<'a> ParseContext<'a> {
         enum_variants: Option<&[String]>,
         inline_value: Option<&str>,
     ) {
-        if is_bool {
+        if mode.is_bool {
             // Bool flag: presence means true
             let value = if let Some(v) = inline_value {
                 // --flag=true or --flag=false
@@ -813,7 +813,7 @@ impl<'a> ParseContext<'a> {
                     span: None,
                     provenance: Some(prov),
                 }),
-                is_multiple,
+                mode.is_multiple,
             );
             self.index += 1;
         } else {
