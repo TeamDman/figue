@@ -134,6 +134,18 @@ fn test_short_rename() {
 }
 
 #[test]
+fn test_duplicate_non_multiple_named_last_value_wins() {
+    #[derive(Facet, Debug)]
+    struct Args {
+        #[facet(args::named)]
+        port: u16,
+    }
+
+    let args: Args = figue::from_slice(&["--port", "1", "--port", "2"]).unwrap();
+    assert_eq!(args.port, 2);
+}
+
+#[test]
 fn test_bool_str_before() {
     #[derive(Facet, Debug)]
     struct Args {

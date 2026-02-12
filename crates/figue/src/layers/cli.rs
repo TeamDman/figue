@@ -972,23 +972,28 @@ impl<'a> ParseContext<'a> {
                 }
             }
             indexmap::map::Entry::Occupied(mut entry) => {
-                // Accumulate into array for repeated flags
-                let existing = entry.get_mut();
-                if let ConfigValue::Array(arr) = existing {
-                    arr.value.push(value);
+                if is_multiple {
+                    // Accumulate into array for repeated multi-value args
+                    let existing = entry.get_mut();
+                    if let ConfigValue::Array(arr) = existing {
+                        arr.value.push(value);
+                    } else {
+                        // Convert to array with both values
+                        let placeholder = ConfigValue::Null(Sourced {
+                            value: (),
+                            span: None,
+                            provenance: None,
+                        });
+                        let old = core::mem::replace(existing, placeholder);
+                        *existing = ConfigValue::Array(Sourced {
+                            value: vec![old, value],
+                            span: None,
+                            provenance: None,
+                        });
+                    }
                 } else {
-                    // Convert to array with both values
-                    let placeholder = ConfigValue::Null(Sourced {
-                        value: (),
-                        span: None,
-                        provenance: None,
-                    });
-                    let old = core::mem::replace(existing, placeholder);
-                    *existing = ConfigValue::Array(Sourced {
-                        value: vec![old, value],
-                        span: None,
-                        provenance: None,
-                    });
+                    // For scalar args, keep the latest value.
+                    entry.insert(value);
                 }
             }
         }
