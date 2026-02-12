@@ -229,3 +229,150 @@ fn test_doubledash_with_subcommand_and_trailing_args() {
         }
     );
 }
+
+/// Reproduces positional `Vec<String>` parsing for a flattened subcommand payload.
+///
+/// Command shape under test:
+/// `cli gradle [task1] [task2] ...`
+#[test]
+fn test_subcommand_flatten_positional_vec_single_scalar() {
+    #[derive(Facet, Debug, PartialEq)]
+    struct GradleCommand {
+        #[facet(args::positional)]
+        tasks: Vec<String>,
+
+        #[facet(rename = "hide-logs", args::named, default = false)]
+        hide_logs: bool,
+    }
+
+    #[derive(Facet, Debug, PartialEq)]
+    #[repr(u8)]
+    enum Command {
+        Gradle {
+            #[facet(flatten)]
+            command: GradleCommand,
+        },
+    }
+
+    #[derive(Facet, Debug, PartialEq)]
+    struct Cli {
+        #[facet(args::subcommand)]
+        command: Command,
+    }
+
+    let cli = figue::from_slice::<Cli>(&["gradle", "runData"]).unwrap();
+    assert_eq!(
+        cli,
+        Cli {
+            command: Command::Gradle {
+                command: GradleCommand {
+                    tasks: vec!["runData".to_string()],
+                    hide_logs: false,
+                },
+            },
+        }
+    );
+}
+
+/// Reproduces positional `Vec<String>` parsing for multiple trailing task tokens.
+#[test]
+fn test_subcommand_flatten_positional_vec_multiple_scalars() {
+    #[derive(Facet, Debug, PartialEq)]
+    struct GradleCommand {
+        #[facet(args::positional)]
+        tasks: Vec<String>,
+
+        #[facet(rename = "hide-logs", args::named, default = false)]
+        hide_logs: bool,
+    }
+
+    #[derive(Facet, Debug, PartialEq)]
+    #[repr(u8)]
+    enum Command {
+        Gradle {
+            #[facet(flatten)]
+            command: GradleCommand,
+        },
+    }
+
+    #[derive(Facet, Debug, PartialEq)]
+    struct Cli {
+        #[facet(args::subcommand)]
+        command: Command,
+    }
+
+    let cli =
+        figue::from_slice::<Cli>(&["gradle", "runData", "runGameTestServer", "test"]).unwrap();
+    assert_eq!(
+        cli,
+        Cli {
+            command: Command::Gradle {
+                command: GradleCommand {
+                    tasks: vec![
+                        "runData".to_string(),
+                        "runGameTestServer".to_string(),
+                        "test".to_string()
+                    ],
+                    hide_logs: false,
+                },
+            },
+        }
+    );
+}
+
+/// Ensures one-token and multi-token trailing args behave consistently.
+///
+/// If either parse errors, the error path should be clear.
+#[test]
+fn test_subcommand_flatten_positional_vec_error_path_is_consistent() {
+    #[derive(Facet, Debug, PartialEq)]
+    struct GradleCommand {
+        #[facet(args::positional)]
+        tasks: Vec<String>,
+
+        #[facet(rename = "hide-logs", args::named, default = false)]
+        hide_logs: bool,
+    }
+
+    #[derive(Facet, Debug, PartialEq)]
+    #[repr(u8)]
+    enum Command {
+        Gradle {
+            #[facet(flatten)]
+            command: GradleCommand,
+        },
+    }
+
+    #[derive(Facet, Debug, PartialEq)]
+    struct Cli {
+        #[facet(args::subcommand)]
+        command: Command,
+    }
+
+    let one = figue::from_slice::<Cli>(&["gradle", "runData"]).into_result();
+    let many = figue::from_slice::<Cli>(&["gradle", "runData", "test"]).into_result();
+
+    if let Err(err) = &one {
+        let msg = err.to_string();
+        assert!(msg.contains("tasks"), "error should reference tasks field: {msg}");
+        assert!(
+            msg.contains("command::Gradle.tasks") || msg.contains("command::Gradle.command.tasks"),
+            "error path should include Gradle.tasks (flattened or nested form): {msg}"
+        );
+    }
+
+    if let Err(err) = &many {
+        let msg = err.to_string();
+        assert!(msg.contains("tasks"), "error should reference tasks field: {msg}");
+        assert!(
+            msg.contains("command::Gradle.tasks") || msg.contains("command::Gradle.command.tasks"),
+            "error path should include Gradle.tasks (flattened or nested form): {msg}"
+        );
+    }
+
+    assert_eq!(
+        one.is_ok(),
+        many.is_ok(),
+        "inconsistent outcomes for one vs many positional task scalars: one={one:?}, many={many:?}"
+    );
+}
