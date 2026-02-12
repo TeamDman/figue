@@ -1353,10 +1353,12 @@ impl<'a> ParseContext<'a> {
         match result_map.entry(head.clone()) {
             indexmap::map::Entry::Vacant(entry) => {
                 if is_multiple {
+                    let wrapper_span = value.span();
+                    let wrapper_provenance = value.provenance().cloned();
                     entry.insert(ConfigValue::Array(Sourced {
                         value: vec![value],
-                        span: None,
-                        provenance: None,
+                        span: wrapper_span,
+                        provenance: wrapper_provenance,
                     }));
                 } else {
                     entry.insert(value);
@@ -1367,6 +1369,12 @@ impl<'a> ParseContext<'a> {
                     // Accumulate into array for repeated multi-value args
                     let existing = entry.get_mut();
                     if let ConfigValue::Array(arr) = existing {
+                        if arr.span.is_none() {
+                            arr.span = value.span();
+                        }
+                        if arr.provenance.is_none() {
+                            arr.provenance = value.provenance().cloned();
+                        }
                         arr.value.push(value);
                     } else {
                         // Convert to array with both values
@@ -1376,10 +1384,13 @@ impl<'a> ParseContext<'a> {
                             provenance: None,
                         });
                         let old = core::mem::replace(existing, placeholder);
+                        let wrapper_span = old.span().or(value.span());
+                        let wrapper_provenance =
+                            old.provenance().cloned().or_else(|| value.provenance().cloned());
                         *existing = ConfigValue::Array(Sourced {
                             value: vec![old, value],
-                            span: None,
-                            provenance: None,
+                            span: wrapper_span,
+                            provenance: wrapper_provenance,
                         });
                     }
                 } else {
@@ -1768,6 +1779,12 @@ mod tests {
         verbose: u8,
     }
 
+    #[derive(Facet)]
+    struct MultiNamedArgs {
+        #[facet(args::named)]
+        items: Vec<String>,
+    }
+
     // ========================================================================
     // Tests: Basic flag parsing
     // ========================================================================
@@ -1832,6 +1849,33 @@ mod tests {
                 ("port", cv::string("8080", "--port")),
             ]),
         );
+    }
+
+    #[test]
+    fn test_multiple_named_array_container_keeps_metadata() {
+        let schema = Schema::from_shape(MultiNamedArgs::SHAPE).expect("valid schema");
+        let output = parse_cli(&schema, &cli_config(&["--items", "one", "--items", "two"]));
+
+        assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+        let root = output.value.expect("expected value");
+
+        let ConfigValue::Object(obj) = root else {
+            panic!("expected object root");
+        };
+        let Some(ConfigValue::Array(arr)) = obj.value.get("items") else {
+            panic!("expected items array");
+        };
+
+        assert_eq!(arr.value.len(), 2);
+        assert!(arr.span.is_some(), "array wrapper span should be set");
+        assert!(
+            arr.provenance.is_some(),
+            "array wrapper provenance should be set"
+        );
+        match arr.provenance.as_ref() {
+            Some(Provenance::Cli { arg, .. }) => assert_eq!(arg, "--items"),
+            other => panic!("expected CLI provenance, got: {other:?}"),
+        }
     }
 
     // ========================================================================
