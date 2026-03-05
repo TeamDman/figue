@@ -69,6 +69,41 @@ fn test_to_args_deterministic() {
     assert_eq!(args1, args2);
 }
 
+#[test]
+fn test_clean_command_hint_includes_full_invocation() {
+    let cli = Cli {
+        verbose: false,
+        command: Command::Clean,
+    };
+
+    let args_string = cli
+        .to_args_string()
+        .expect("clean to_args_string should succeed");
+    let full_command = cli
+        .to_args_string_with_current_exe()
+        .expect("clean to_args_string_with_current_exe should succeed");
+    let exe_display = std::env::current_exe()
+        .expect("current_exe should resolve during tests")
+        .to_string_lossy()
+        .to_string();
+
+    let hint = format!(
+        "If you're having trouble with your builds, run the clean command: {}",
+        full_command
+    );
+
+    assert!(
+        hint.contains("If you're having trouble with your builds"),
+        "hint should include support message"
+    );
+    assert!(hint.contains("clean"), "hint should include clean subcommand");
+    assert_eq!(args_string, "clean", "args_string should only include args");
+    assert!(
+        hint.contains(&exe_display),
+        "hint should include executable path"
+    );
+}
+
 #[cfg(feature = "arbitrary")]
 #[test]
 fn test_consumer_helper_assert_to_args_consistency() {

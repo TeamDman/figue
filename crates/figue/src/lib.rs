@@ -213,7 +213,9 @@ pub use extract::{ExtractError, ExtractMissingField};
 pub use help::{HelpConfig, generate_help, generate_help_for_shape};
 pub use layers::env::MockEnv;
 pub use layers::file::FormatRegistry;
-pub use to_args::{ToArgs, ToArgsError, to_os_args};
+pub use to_args::{
+    ToArgs, ToArgsError, to_args_string, to_args_string_with_current_exe, to_os_args,
+};
 
 /// Parse command-line arguments from `std::env::args()`.
 ///

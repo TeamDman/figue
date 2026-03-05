@@ -40,6 +40,8 @@ pub enum ToArgsError {
         /// Effective field name of the argument.
         arg_name: String,
     },
+    /// Failed to resolve the current executable path.
+    CurrentExe(String),
 }
 
 impl core::fmt::Display for ToArgsError {
@@ -71,6 +73,9 @@ impl core::fmt::Display for ToArgsError {
             ToArgsError::UnsupportedScalarValue { arg_name } => {
                 write!(f, "argument `{arg_name}` has an unsupported scalar value")
             }
+            ToArgsError::CurrentExe(message) => {
+                write!(f, "failed to resolve current executable: {message}")
+            }
         }
     }
 }
@@ -87,11 +92,50 @@ pub fn to_os_args<T: Facet<'static> + ?Sized>(value: &T) -> Result<Vec<OsString>
     to_os_args_with_schema(value, &schema)
 }
 
+/// Convert a typed CLI value into a shell-friendly command argument string.
+///
+/// This is equivalent to [`to_os_args`] joined by spaces with lossy UTF-8 conversion.
+pub fn to_args_string<T: Facet<'static> + ?Sized>(value: &T) -> Result<String, ToArgsError> {
+    let args = to_os_args(value)?;
+    Ok(args
+        .iter()
+        .map(|arg| arg.to_string_lossy().to_string())
+        .collect::<Vec<_>>()
+        .join(" "))
+}
+
+/// Convert a typed CLI value into a shell-friendly command string prefixed with
+/// the current executable path.
+pub fn to_args_string_with_current_exe<T: Facet<'static> + ?Sized>(
+    value: &T,
+) -> Result<String, ToArgsError> {
+    let exe = std::env::current_exe().map_err(|error| ToArgsError::CurrentExe(error.to_string()))?;
+    let exe_display = exe.to_string_lossy().to_string();
+    let args = to_args_string(value)?;
+
+    if args.is_empty() {
+        Ok(exe_display)
+    } else {
+        Ok(format!("{exe_display} {args}"))
+    }
+}
+
 /// Convenience trait for converting typed CLI values to argument vectors.
 pub trait ToArgs: Facet<'static> {
     /// Convert this value into a vector of CLI arguments.
     fn to_args(&self) -> Result<Vec<OsString>, ToArgsError> {
         to_os_args(self)
+    }
+
+    /// Convert this value into a shell-friendly command argument string.
+    fn to_args_string(&self) -> Result<String, ToArgsError> {
+        to_args_string(self)
+    }
+
+    /// Convert this value into a shell-friendly command string prefixed with
+    /// the current executable path.
+    fn to_args_string_with_current_exe(&self) -> Result<String, ToArgsError> {
+        to_args_string_with_current_exe(self)
     }
 }
 
@@ -350,6 +394,37 @@ mod tests {
             .get_silent();
 
         assert_eq!(cli, parsed);
+    }
+
+    #[test]
+    fn to_args_string_joins_arguments() {
+        let cli = Cli {
+            verbose: true,
+            command: Command::Build { release: true },
+        };
+
+        let args_string = to_args_string(&cli).expect("to_args_string should succeed");
+        assert!(args_string.contains("--verbose"));
+        assert!(args_string.contains("build"));
+        assert!(args_string.contains("--release"));
+    }
+
+    #[test]
+    fn to_args_string_with_current_exe_prefixes_command() {
+        let cli = Cli {
+            verbose: false,
+            command: Command::Build { release: false },
+        };
+
+        let command =
+            to_args_string_with_current_exe(&cli).expect("to_args_string_with_current_exe should succeed");
+        let exe_display = std::env::current_exe()
+            .expect("current_exe should resolve")
+            .to_string_lossy()
+            .to_string();
+
+        assert!(command.starts_with(&exe_display));
+        assert!(command.contains("build"));
     }
 
     #[test]
