@@ -168,6 +168,9 @@ pub mod completions;
 pub(crate) mod config_format;
 pub(crate) mod config_value;
 pub(crate) mod config_value_parser;
+/// Arbitrary-based helper assertions for consumer roundtrip tests.
+#[cfg(feature = "arbitrary")]
+pub mod arbitrary_checks;
 pub(crate) mod diagnostics;
 pub(crate) mod driver;
 pub(crate) mod dump;
@@ -186,6 +189,8 @@ pub(crate) mod schema;
 pub(crate) mod span;
 pub(crate) mod span_registry;
 pub(crate) mod suggest;
+/// Convert typed CLI values back into command-line arguments.
+pub mod to_args;
 pub(crate) mod value_builder;
 
 use facet_core::Facet;
@@ -195,6 +200,10 @@ use facet_core::Facet;
 // ==========================================
 
 pub use crate::completions::{Shell, generate_completions_for_shape};
+#[cfg(feature = "arbitrary")]
+pub use arbitrary_checks::{
+    ArbitraryCheckError, assert_to_args_consistency, assert_to_args_roundtrip,
+};
 pub use builder::builder;
 pub use config_format::{ConfigFormat, ConfigFormatError, JsonFormat};
 pub use config_value::ConfigValue;
@@ -204,6 +213,7 @@ pub use extract::{ExtractError, ExtractMissingField};
 pub use help::{HelpConfig, generate_help, generate_help_for_shape};
 pub use layers::env::MockEnv;
 pub use layers::file::FormatRegistry;
+pub use to_args::{ToArgs, ToArgsError, to_os_args};
 
 /// Parse command-line arguments from `std::env::args()`.
 ///

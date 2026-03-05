@@ -12,4 +12,5 @@ mod simple;
 mod subcommand;
 mod subcommand_errors;
 mod subspans;
+mod to_args;
 mod unknown_keys;
