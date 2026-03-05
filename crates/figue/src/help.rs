@@ -9,7 +9,9 @@ use crate::schema::{ArgLevelSchema, ArgSchema, Schema, Subcommand};
 use facet_core::Facet;
 use owo_colors::OwoColorize;
 use owo_colors::Stream::Stdout;
+use std::fmt;
 use std::string::String;
+use std::sync::Arc;
 use std::vec::Vec;
 
 /// Generate help text for a Facet type.
@@ -49,7 +51,7 @@ pub fn generate_help_for_shape(shape: &'static facet_core::Shape, config: &HelpC
 }
 
 /// Configuration for help text generation.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct HelpConfig {
     /// Program name (defaults to executable name)
     pub program_name: Option<String>,
@@ -61,6 +63,27 @@ pub struct HelpConfig {
     pub width: usize,
     /// Whether to include implementation source file information in help output.
     pub include_implementation_source_file: bool,
+    /// Optional callback to render an implementation URL from a source file path.
+    pub implementation_url: Option<Arc<dyn Fn(&str) -> String + Send + Sync>>,
+}
+
+impl fmt::Debug for HelpConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HelpConfig")
+            .field("program_name", &self.program_name)
+            .field("version", &self.version)
+            .field("description", &self.description)
+            .field("width", &self.width)
+            .field(
+                "include_implementation_source_file",
+                &self.include_implementation_source_file,
+            )
+            .field(
+                "implementation_url",
+                &self.implementation_url.as_ref().map(|_| "<fn>"),
+            )
+            .finish()
+    }
 }
 
 impl Default for HelpConfig {
@@ -71,6 +94,7 @@ impl Default for HelpConfig {
             description: None,
             width: 80,
             include_implementation_source_file: false,
+            implementation_url: None,
         }
     }
 }
