@@ -3,6 +3,7 @@ use facet_testhelpers::test;
 use figue::{self as args, ToArgs};
 
 #[derive(Facet, Debug, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[repr(u8)]
 enum Command {
     Build {
@@ -16,6 +17,7 @@ enum Command {
 }
 
 #[derive(Facet, Debug, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 struct Cli {
     #[facet(args::named, args::short = 'v')]
     verbose: bool,
@@ -65,4 +67,18 @@ fn test_to_args_deterministic() {
     let args2 = cli.to_args().expect("second conversion should succeed");
 
     assert_eq!(args1, args2);
+}
+
+#[cfg(feature = "arbitrary")]
+#[test]
+fn test_consumer_helper_assert_to_args_consistency() {
+    figue::assert_to_args_consistency::<Cli>(8)
+        .expect("consumer helper consistency check should pass");
+}
+
+#[cfg(feature = "arbitrary")]
+#[test]
+fn test_consumer_helper_assert_to_args_roundtrip() {
+    figue::assert_to_args_roundtrip::<Cli>(4)
+        .expect("consumer helper roundtrip check should pass");
 }
