@@ -795,6 +795,64 @@ impl<'a> ParseContext<'a> {
             return true;
         }
 
+        if self.try_parse_help_pseudo_subcommand(level) {
+            return true;
+        }
+
+        false
+    }
+
+    fn try_parse_help_pseudo_subcommand(&mut self, level: &ArgLevelSchema) -> bool {
+        let arg = self.args[self.index];
+        if arg != "help" {
+            return false;
+        }
+
+        // If the application defines a real `help` subcommand, it must take precedence.
+        if level
+            .subcommands()
+            .keys()
+            .any(|name| name.to_kebab_case() == "help")
+        {
+            return false;
+        }
+
+        // Otherwise, treat `help` as shorthand for `--help` if a bool help flag exists.
+        if let Some((effective_name, arg_schema)) = level.args().get("help")
+            && matches!(arg_schema.kind(), ArgKind::Named { .. })
+            && arg_schema.value().inner_if_option().is_bool()
+        {
+            self.parse_flag_value_simple(
+                arg,
+                InsertTarget::Current,
+                effective_name,
+                FlagValueMode {
+                    is_bool: true,
+                    is_multiple: arg_schema.multiple(),
+                },
+                None,
+                None,
+            );
+            return true;
+        }
+
+        if let Some(lookup) = self.find_long_flag_in_parents("help")
+            && lookup.is_bool
+        {
+            self.parse_flag_value_simple(
+                arg,
+                InsertTarget::Parent(lookup.parent_idx),
+                &lookup.effective_name,
+                FlagValueMode {
+                    is_bool: true,
+                    is_multiple: lookup.is_multiple,
+                },
+                None,
+                None,
+            );
+            return true;
+        }
+
         false
     }
 
@@ -2862,6 +2920,26 @@ mod tests {
         },
     }
 
+    #[derive(Facet)]
+    #[repr(u8)]
+    #[allow(dead_code)]
+    enum AppCommandWithHelp {
+        Help,
+        Install {
+            #[facet(args::positional)]
+            package: String,
+        },
+    }
+
+    #[derive(Facet)]
+    struct AppWithBuiltinsAndHelpSubcommand {
+        #[facet(flatten)]
+        builtins: crate::FigueBuiltins,
+
+        #[facet(args::subcommand)]
+        command: AppCommandWithHelp,
+    }
+
     #[test]
     fn test_adoption_help_flag_bubbles_from_subcommand() {
         // `myapp install foo --help` - help doesn't exist in Install, bubbles to builtins
@@ -2874,6 +2952,22 @@ mod tests {
                     cv::enumv("Install", [("package", cv::string("foo", "foo"))]),
                 ),
             ]),
+        );
+    }
+
+    #[test]
+    fn test_help_word_acts_like_help_flag_when_no_help_subcommand() {
+        assert_parses_to::<AppWithBuiltins>(
+            &["help"],
+            cv::object([("help", cv::bool(true, "help"))]),
+        );
+    }
+
+    #[test]
+    fn test_help_word_prefers_explicit_help_subcommand() {
+        assert_parses_to::<AppWithBuiltinsAndHelpSubcommand>(
+            &["help"],
+            cv::object([("command", cv::enumv("Help", []))]),
         );
     }
 

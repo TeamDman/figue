@@ -1654,6 +1654,25 @@ mod tests {
         builtins: FigueBuiltins,
     }
 
+    #[derive(Facet, Debug, PartialEq)]
+    #[repr(u8)]
+    enum TestCommandWithExplicitHelp {
+        Help,
+        Build {
+            #[facet(figue::named, figue::short = 'r')]
+            release: bool,
+        },
+    }
+
+    #[derive(Facet, Debug)]
+    struct ArgsWithExplicitHelpSubcommand {
+        #[facet(figue::subcommand)]
+        command: TestCommandWithExplicitHelp,
+
+        #[facet(flatten)]
+        builtins: FigueBuiltins,
+    }
+
     // Test the minimal case - subcommand only, no builtins
     #[test]
     fn test_builder_api_with_subcommand_minimal() {
@@ -1697,6 +1716,49 @@ mod tests {
                     panic!("expected Build subcommand, got Run");
                 }
             },
+            Err(e) => panic!("expected success, got error: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_builder_help_word_alias_triggers_help_without_help_subcommand() {
+        let config = builder::<ArgsWithSubcommandAndBuiltins>()
+            .expect("failed to build args schema")
+            .cli(|cli| cli.args(["help"]))
+            .help(|h| h.program_name("test-app"))
+            .build();
+
+        let result = Driver::new(config).run().into_result();
+
+        match result {
+            Err(DriverError::Help { text }) => {
+                assert!(
+                    text.contains("test-app"),
+                    "help should contain configured program name"
+                );
+                assert!(
+                    text.contains("--help"),
+                    "help output should still mention --help"
+                );
+            }
+            other => panic!("expected DriverError::Help, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_builder_help_word_prefers_explicit_help_subcommand() {
+        let config = builder::<ArgsWithExplicitHelpSubcommand>()
+            .expect("failed to build args schema")
+            .cli(|cli| cli.args(["help"]))
+            .build();
+
+        let result = Driver::new(config).run().into_result();
+
+        match result {
+            Ok(output) => {
+                assert_eq!(output.value.command, TestCommandWithExplicitHelp::Help);
+                assert!(!output.value.builtins.help, "builtin help flag should remain false");
+            }
             Err(e) => panic!("expected success, got error: {:?}", e),
         }
     }
