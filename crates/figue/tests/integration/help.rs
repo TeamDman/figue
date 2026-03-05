@@ -402,6 +402,68 @@ fn test_subcommand_help_implementation_source_included_when_enabled() {
 }
 
 #[test]
+fn test_help_implementation_url_included_when_enabled() {
+    let config = figue::builder::<PkgManager>()
+        .expect("schema should be valid")
+        .cli(|cli| cli.args(["--help"]))
+        .help(|h| {
+            h.include_implementation_url(|path| {
+                format!("https://example.com/repo/blob/main/{}", path.replace('\\', "/"))
+            })
+        })
+        .build();
+
+    let result = figue::Driver::new(config).run().into_result();
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.is_help(), "expected help error, got: {:?}", err);
+
+    let help = err.help_text().expect("should have help text");
+    assert!(
+        help.contains("Implementation:"),
+        "help output should include implementation section when URL is enabled"
+    );
+    assert!(
+        help.contains("https://example.com/repo/blob/main/"),
+        "help output should include implementation URL"
+    );
+}
+
+#[test]
+fn test_help_implementation_source_and_git_url_both_included() {
+    let config = figue::builder::<PkgManager>()
+        .expect("schema should be valid")
+        .cli(|cli| cli.args(["--help"]))
+        .help(|h| {
+            h.include_implementation_source_file(true)
+                .include_implementation_git_url(
+                    "TeamDman/teamy-rust-cli",
+                    "56fe5d44a726bb2e44bd7c338103377aa02feedc",
+                )
+        })
+        .build();
+
+    let result = figue::Driver::new(config).run().into_result();
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.is_help(), "expected help error, got: {:?}", err);
+
+    let help = err.help_text().expect("should have help text");
+    assert!(
+        help.contains("Implementation:"),
+        "help output should include implementation section"
+    );
+    assert!(
+        help.contains("help.rs"),
+        "help output should include implementation source file path"
+    );
+    assert!(
+        help.contains("https://github.com/TeamDman/teamy-rust-cli/blob/56fe5d44a726bb2e44bd7c338103377aa02feedc/"),
+        "help output should include generated GitHub implementation URL"
+    );
+}
+
+#[test]
 
 fn test_help_subcommand_list() {
     // `pkg ls --help` should show help specific to the list subcommand
