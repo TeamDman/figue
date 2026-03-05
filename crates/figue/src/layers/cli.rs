@@ -1059,26 +1059,24 @@ impl<'a> ParseContext<'a> {
     }
 
     fn try_parse_subcommand(&mut self, level: &'a ArgLevelSchema) -> bool {
-        let Some(field_name) = level.subcommand_field_name() else {
-            return false;
-        };
-
         let arg = self.args[self.index];
 
-        // Find subcommand by long name (kebab-case) or short alias token ("d").
-        let subcommand = level.subcommands().iter().find(|(name, sub)| {
-            name.to_kebab_case() == arg
-                || sub
-                    .short()
-                    .is_some_and(|short| arg.chars().eq(core::iter::once(short)))
-        });
+        if let Some(field_name) = level.subcommand_field_name() {
+            // Find subcommand by long name (kebab-case) or short alias token ("d").
+            let subcommand = level.subcommands().iter().find(|(name, sub)| {
+                name.to_kebab_case() == arg
+                    || sub
+                        .short()
+                        .is_some_and(|short| arg.chars().eq(core::iter::once(short)))
+            });
 
-        let Some((_, subcommand)) = subcommand else {
-            return false;
-        };
+            if let Some((_, subcommand)) = subcommand {
+                self.consume_subcommand(level, field_name, subcommand, arg);
+                return true;
+            }
+        }
 
-        self.consume_subcommand(level, field_name, subcommand, arg);
-        true
+        self.try_parse_help_pseudo_subcommand(level)
     }
 
     fn consume_subcommand(
@@ -1110,6 +1108,56 @@ impl<'a> ParseContext<'a> {
         });
 
         self.result.insert(field_name.to_string(), enum_value);
+    }
+
+    fn try_parse_help_pseudo_subcommand(&mut self, level: &ArgLevelSchema) -> bool {
+        let arg = self.args[self.index];
+        if arg != "help" {
+            return false;
+        }
+
+        // If the application defines a real `help` subcommand, it must take precedence.
+        if level
+            .subcommands()
+            .keys()
+            .any(|name| name.to_kebab_case() == "help")
+        {
+            return false;
+        }
+
+        // Otherwise, treat `help` as shorthand for `--help` if a bool help flag exists.
+        if let Some((_effective_name, arg_schema)) = level.args().get("help")
+            && matches!(arg_schema.kind(), ArgKind::Named { .. })
+            && arg_schema.value().inner_if_option().is_bool()
+        {
+            self.parse_flag_value_simple(
+                arg,
+                InsertTarget::Current,
+                arg_schema.insertion_path(),
+                true,
+                arg_schema.multiple(),
+                None,
+                None,
+            );
+            return true;
+        }
+
+        if let Some(lookup) = self.find_long_flag_in_parents("help")
+            && lookup.is_bool
+        {
+            self.parse_flag_value_simple(
+                arg,
+                InsertTarget::Parent(lookup.parent_idx),
+                &lookup.insertion_path,
+                true,
+                lookup.is_multiple,
+                None,
+                None,
+            );
+            return true;
+        }
+
+        false
     }
 
     fn parse_subcommand_args(
@@ -3345,6 +3393,26 @@ mod tests {
         },
     }
 
+    #[derive(Facet)]
+    #[repr(u8)]
+    #[allow(dead_code)]
+    enum AppCommandWithHelp {
+        Help,
+        Install {
+            #[facet(args::positional)]
+            package: String,
+        },
+    }
+
+    #[derive(Facet)]
+    struct AppWithBuiltinsAndHelpSubcommand {
+        #[facet(flatten)]
+        builtins: crate::FigueBuiltins,
+
+        #[facet(args::subcommand)]
+        command: AppCommandWithHelp,
+    }
+
     #[test]
     fn test_adoption_help_flag_bubbles_from_subcommand() {
         // `myapp install foo --help` - help doesn't exist in Install, bubbles to builtins
@@ -3357,6 +3425,22 @@ mod tests {
                     cv::enumv("Install", [("package", cv::string("foo", "foo"))]),
                 ),
             ]),
+        );
+    }
+
+    #[test]
+    fn test_help_word_acts_like_help_flag_when_no_help_subcommand() {
+        assert_parses_to::<AppWithBuiltins>(
+            &["help"],
+            cv::object([("help", cv::bool(true, "help"))]),
+        );
+    }
+
+    #[test]
+    fn test_help_word_prefers_explicit_help_subcommand() {
+        assert_parses_to::<AppWithBuiltinsAndHelpSubcommand>(
+            &["help"],
+            cv::object([("command", cv::enumv("Help", []))]),
         );
     }
 
