@@ -908,23 +908,35 @@ fn maybe_append_implementation_source<T: Facet<'static>>(
     help_config: &crate::help::HelpConfig,
     subcommand_path: &[String],
 ) {
-    if !help_config.include_implementation_source_file {
-        return;
-    }
-
     let Some(source_file) = implementation_source_for_subcommand_path(T::SHAPE, subcommand_path)
     else {
         return;
     };
+
+    let implementation_url = help_config
+        .implementation_url
+        .as_ref()
+        .map(|render_url| render_url(source_file));
+
+    if !help_config.include_implementation_source_file && implementation_url.is_none() {
+        return;
+    }
 
     if !help_text.ends_with('\n') {
         help_text.push('\n');
     }
     help_text.push('\n');
     help_text.push_str("Implementation:\n");
-    help_text.push_str("    ");
-    help_text.push_str(source_file);
-    help_text.push('\n');
+    if help_config.include_implementation_source_file {
+        help_text.push_str("    ");
+        help_text.push_str(source_file);
+        help_text.push('\n');
+    }
+    if let Some(implementation_url) = implementation_url {
+        help_text.push_str("    ");
+        help_text.push_str(&implementation_url);
+        help_text.push('\n');
+    }
 }
 
 /// Get the source name and contents for a provenance.
