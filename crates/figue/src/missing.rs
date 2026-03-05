@@ -23,11 +23,17 @@ pub fn normalize_program_name(path: &str) -> String {
         .and_then(|n| n.to_str())
         .unwrap_or(path);
 
+    // For Windows test binaries, strip trailing .exe before hash detection.
+    let stem = name
+        .strip_suffix(".exe")
+        .or_else(|| name.strip_suffix(".EXE"))
+        .unwrap_or(name);
+
     // Check if the name ends with a dash followed by exactly 16 hex characters
-    if let Some(dash_pos) = name.rfind('-') {
-        let suffix = &name[dash_pos + 1..];
+    if let Some(dash_pos) = stem.rfind('-') {
+        let suffix = &stem[dash_pos + 1..];
         if suffix.len() == 16 && suffix.chars().all(|c| c.is_ascii_hexdigit()) {
-            return name[..dash_pos].to_string();
+            return stem[..dash_pos].to_string();
         }
     }
     name.to_string()
@@ -1504,8 +1510,22 @@ mod tests {
         );
         assert_eq!(
             normalize_program_name(
+                "C:\\Users\\runner\\work\\figue\\target\\debug\\deps\\main-138217976bbdb088.exe"
+            ),
+            "main"
+        );
+        assert_eq!(
+            normalize_program_name(
                 "/home/runner/work/figue/figue/target/debug/deps/main-b36e7ccd11ac5f87"
             ),
+            "main"
+        );
+        assert_eq!(
+            normalize_program_name("main-b36e7ccd11ac5f87.exe"),
+            "main"
+        );
+        assert_eq!(
+            normalize_program_name("main-b36e7ccd11ac5f87.EXE"),
             "main"
         );
 
