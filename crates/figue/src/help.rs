@@ -215,7 +215,7 @@ pub fn generate_help_for_subcommand(
 /// In [`HelpListMode::Short`], this returns one full CLI command path per line,
 /// recursively listing all reachable leaf commands.
 /// In [`HelpListMode::Full`], this returns concatenated help output for each
-/// immediate subcommand under the current command path.
+/// reachable leaf subcommand under the current command path.
 pub(crate) fn generate_help_list_for_subcommand(
     schema: &Schema,
     subcommand_path: &[String],
@@ -282,13 +282,34 @@ pub(crate) fn generate_help_list_for_subcommand(
         }
         HelpListMode::Full => {
             let mut sections = Vec::new();
-            for sub in current_args.subcommands().values() {
-                let mut child_path = resolved_path.clone();
-                child_path.push(sub.effective_name().to_string());
+            let mut leaf_paths = Vec::new();
+            let mut working_path = resolved_path.clone();
+            collect_leaf_subcommand_paths(&mut leaf_paths, &mut working_path, current_args);
+
+            for child_path in leaf_paths {
                 sections.push(generate_help_for_subcommand(schema, &child_path, config));
             }
             sections.join("\n\n")
         }
+    }
+}
+
+fn collect_leaf_subcommand_paths(
+    leaf_paths: &mut Vec<Vec<String>>,
+    current_path: &mut Vec<String>,
+    args: &ArgLevelSchema,
+) {
+    if !args.has_subcommands() {
+        if !current_path.is_empty() {
+            leaf_paths.push(current_path.clone());
+        }
+        return;
+    }
+
+    for sub in args.subcommands().values() {
+        current_path.push(sub.effective_name().to_string());
+        collect_leaf_subcommand_paths(leaf_paths, current_path, sub.args());
+        current_path.pop();
     }
 }
 
@@ -774,5 +795,26 @@ mod tests {
                 "myapp cache show"
             ]
         );
+    }
+
+    #[test]
+    fn test_help_list_full_is_recursive_for_leaf_subcommands() {
+        let schema = Schema::from_shape(NestedRootArgs::SHAPE).unwrap();
+        let output = generate_help_list_for_subcommand(
+            &schema,
+            &[],
+            &HelpConfig {
+                program_name: Some("myapp".to_string()),
+                ..HelpConfig::default()
+            },
+            HelpListMode::Full,
+        );
+
+        assert!(output.contains("myapp home open"));
+        assert!(output.contains("myapp home show"));
+        assert!(output.contains("myapp cache open"));
+        assert!(output.contains("myapp cache show"));
+        assert!(!output.contains("myapp home\n\n"));
+        assert!(!output.contains("myapp cache\n\n"));
     }
 }
