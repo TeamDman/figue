@@ -483,6 +483,16 @@ impl HelpConfigBuilder {
         self
     }
 
+    /// Enable or disable implementation source file hints in help output.
+    ///
+    /// When enabled, help text includes an `Implementation:` section that points
+    /// to the source file reported by Facet shape metadata (`Shape::source_file`).
+    /// This is useful for CLIs that want to guide contributors to command handlers.
+    pub fn include_implementation_source_file(mut self, include: bool) -> Self {
+        self.config.include_implementation_source_file = include;
+        self
+    }
+
     /// Build the help configuration.
     fn build(self) -> HelpConfig {
         self.config

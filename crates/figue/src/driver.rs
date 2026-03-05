@@ -31,6 +31,7 @@ use crate::dump::dump_config_with_schema;
 use crate::enum_conflicts::detect_enum_conflicts;
 use crate::env_subst::{EnvSubstError, RealEnv, substitute_env_vars};
 use crate::help::generate_help_for_subcommand;
+use crate::help::implementation_source_for_subcommand_path;
 use crate::layers::{cli::parse_cli, env::parse_env, file::parse_file};
 use crate::merge::merge_layers;
 use crate::missing::{
@@ -232,11 +233,12 @@ impl<T: Facet<'static>> Driver<T> {
                     Vec::new()
                 };
 
-                let text = generate_help_for_subcommand(
+                let mut text = generate_help_for_subcommand(
                     &self.config.schema,
                     &subcommand_path,
                     &help_config,
                 );
+                maybe_append_implementation_source::<T>(&mut text, &help_config, &subcommand_path);
                 return DriverOutcome::err(DriverError::Help { text });
             }
 
@@ -415,7 +417,8 @@ impl<T: Facet<'static>> Driver<T> {
                     .cloned()
                     .unwrap_or_default();
 
-                let help = generate_help_for_subcommand(&self.config.schema, &[], &help_config);
+                let mut help = generate_help_for_subcommand(&self.config.schema, &[], &help_config);
+                maybe_append_implementation_source::<T>(&mut help, &help_config, &[]);
                 return DriverOutcome::err(DriverError::Help { text: help });
             }
 
@@ -660,6 +663,30 @@ impl<T: Facet<'static>> Driver<T> {
             schema: self.config.schema.clone(),
         })
     }
+}
+
+fn maybe_append_implementation_source<T: Facet<'static>>(
+    help_text: &mut String,
+    help_config: &crate::help::HelpConfig,
+    subcommand_path: &[String],
+) {
+    if !help_config.include_implementation_source_file {
+        return;
+    }
+
+    let Some(source_file) = implementation_source_for_subcommand_path(T::SHAPE, subcommand_path)
+    else {
+        return;
+    };
+
+    if !help_text.ends_with('\n') {
+        help_text.push('\n');
+    }
+    help_text.push('\n');
+    help_text.push_str("Implementation:\n");
+    help_text.push_str("    ");
+    help_text.push_str(source_file);
+    help_text.push('\n');
 }
 
 /// Get the source name and contents for a provenance.

@@ -58,6 +58,8 @@ pub struct HelpConfig {
     pub description: Option<String>,
     /// Width for wrapping text (0 = no wrapping)
     pub width: usize,
+    /// Whether to include implementation source file information in help output.
+    pub include_implementation_source_file: bool,
 }
 
 impl Default for HelpConfig {
@@ -67,8 +69,82 @@ impl Default for HelpConfig {
             version: None,
             description: None,
             width: 80,
+            include_implementation_source_file: false,
         }
     }
+}
+
+/// Resolve implementation source file for a subcommand path from a root shape.
+///
+/// The `subcommand_path` should contain effective subcommand names (as emitted by
+/// `ConfigValue::extract_subcommand_path`). An empty path resolves to the root shape.
+pub(crate) fn implementation_source_for_subcommand_path(
+    root_shape: &'static facet_core::Shape,
+    subcommand_path: &[String],
+) -> Option<&'static str> {
+    let mut current_shape = root_shape;
+
+    if subcommand_path.is_empty() {
+        return current_shape.source_file;
+    }
+
+    for segment in subcommand_path {
+        let next_shape = next_subcommand_shape(current_shape, segment)?;
+        current_shape = next_shape;
+    }
+
+    current_shape.source_file
+}
+
+fn next_subcommand_shape(
+    shape: &'static facet_core::Shape,
+    target_effective_name: &str,
+) -> Option<&'static facet_core::Shape> {
+    let fields = match shape.ty {
+        facet_core::Type::User(facet_core::UserType::Struct(s)) => s.fields,
+        _ => return None,
+    };
+
+    let subcommand_field = fields
+        .iter()
+        .find(|field| field.has_attr(Some("args"), "subcommand"))?;
+
+    let enum_shape = unwrap_option_shape(subcommand_field.shape());
+    let variants = match enum_shape.ty {
+        facet_core::Type::User(facet_core::UserType::Enum(e)) => e.variants,
+        _ => return None,
+    };
+
+    let variant = variants
+        .iter()
+        .find(|variant| variant.effective_name() == target_effective_name)?;
+
+    if variant.data.fields.is_empty() {
+        return Some(enum_shape);
+    }
+
+    let has_direct_subcommand = variant
+        .data
+        .fields
+        .iter()
+        .any(|field| field.has_attr(Some("args"), "subcommand"));
+
+    if has_direct_subcommand {
+        return Some(enum_shape);
+    }
+
+    if variant.data.fields.len() == 1 {
+        return Some(unwrap_option_shape(variant.data.fields[0].shape()));
+    }
+
+    Some(enum_shape)
+}
+
+fn unwrap_option_shape(mut shape: &'static facet_core::Shape) -> &'static facet_core::Shape {
+    while let facet_core::Def::Option(option_def) = shape.def {
+        shape = option_def.t;
+    }
+    shape
 }
 
 /// Generate help text for a specific subcommand path from a Schema.
