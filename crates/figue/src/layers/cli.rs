@@ -1470,8 +1470,10 @@ impl<'a> ParseContext<'a> {
                         });
                         let old = core::mem::replace(existing, placeholder);
                         let wrapper_span = old.span().or(value.span());
-                        let wrapper_provenance =
-                            old.provenance().cloned().or_else(|| value.provenance().cloned());
+                        let wrapper_provenance = old
+                            .provenance()
+                            .cloned()
+                            .or_else(|| value.provenance().cloned());
                         *existing = ConfigValue::Array(Sourced {
                             value: vec![old, value],
                             span: wrapper_span,
@@ -3429,6 +3431,49 @@ mod tests {
             #[facet(args::named)]
             force: bool,
         },
+    }
+
+    #[derive(Facet)]
+    struct AppWithBuiltinsNestedSubcommands {
+        #[facet(flatten)]
+        builtins: crate::FigueBuiltins,
+
+        #[facet(args::subcommand)]
+        command: BuiltinsRootCommand,
+    }
+
+    #[derive(Facet)]
+    #[repr(u8)]
+    #[allow(dead_code)]
+    enum BuiltinsRootCommand {
+        Home(BuiltinsHomeCommandArgs),
+    }
+
+    #[derive(Facet)]
+    struct BuiltinsHomeCommandArgs {
+        #[facet(args::subcommand)]
+        action: BuiltinsHomeAction,
+    }
+
+    #[derive(Facet)]
+    #[repr(u8)]
+    #[allow(dead_code)]
+    enum BuiltinsHomeAction {
+        Open,
+    }
+
+    #[test]
+    fn test_help_word_bubbles_from_nested_leaf_subcommand() {
+        assert_parses_to::<AppWithBuiltinsNestedSubcommands>(
+            &["home", "open", "help"],
+            cv::object([
+                ("help", cv::bool(true, "help")),
+                (
+                    "command",
+                    cv::enumv("Home", [("action", cv::enumv("Open", []))]),
+                ),
+            ]),
+        );
     }
 
     #[derive(Facet)]

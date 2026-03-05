@@ -2324,7 +2324,10 @@ mod tests {
         match result {
             Ok(output) => {
                 assert_eq!(output.value.command, TestCommandWithExplicitHelp::Help);
-                assert!(!output.value.builtins.help, "builtin help flag should remain false");
+                assert!(
+                    !output.value.builtins.help,
+                    "builtin help flag should remain false"
+                );
             }
             Err(e) => panic!("expected success, got error: {:?}", e),
         }
