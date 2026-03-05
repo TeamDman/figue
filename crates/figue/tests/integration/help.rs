@@ -394,7 +394,10 @@ fn test_subcommand_help_implementation_source_included_when_enabled() {
     assert!(err.is_help(), "expected help error, got: {:?}", err);
 
     let help = err.help_text().expect("should have help text");
-    assert!(help.contains("install"), "help should be install subcommand help");
+    assert!(
+        help.contains("install"),
+        "help should be install subcommand help"
+    );
     assert!(
         help.contains("Implementation:"),
         "subcommand help should include implementation section when enabled"
@@ -468,7 +471,10 @@ fn test_help_list_short_root_shows_immediate_subcommands() {
     assert!(err.is_help(), "expected help error, got: {:?}", err);
 
     let help = err.help_text().expect("should have help text");
-    assert!(help.contains("install"), "short list should include install");
+    assert!(
+        help.contains("install"),
+        "short list should include install"
+    );
     assert!(help.contains("rm"), "short list should include rm");
     assert!(help.contains("ls"), "short list should include ls");
     assert!(
@@ -485,8 +491,14 @@ fn test_help_list_root_shows_subcommand_helps() {
     assert!(err.is_help(), "expected help error, got: {:?}", err);
 
     let help = err.help_text().expect("should have help text");
-    assert!(help.contains("install"), "full list should include install help");
-    assert!(help.contains("--global"), "full list should include install flags");
+    assert!(
+        help.contains("install"),
+        "full list should include install help"
+    );
+    assert!(
+        help.contains("--global"),
+        "full list should include install flags"
+    );
     assert!(help.contains("rm"), "full list should include rm help");
     assert!(help.contains("--yes"), "full list should include rm flags");
     assert!(help.contains("ls"), "full list should include ls help");
@@ -641,8 +653,14 @@ fn test_help_list_short_nested_shows_immediate_subcommands() {
     assert!(err.is_help(), "expected help error, got: {:?}", err);
 
     let help = err.help_text().expect("should have help text");
-    assert!(help.contains("clone"), "nested short list should include clone");
-    assert!(help.contains("push"), "nested short list should include push");
+    assert!(
+        help.contains("clone"),
+        "nested short list should include clone"
+    );
+    assert!(
+        help.contains("push"),
+        "nested short list should include push"
+    );
     assert!(
         !help.contains("--force"),
         "nested short list should not include flag details"

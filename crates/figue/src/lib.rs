@@ -162,15 +162,15 @@ use figue_attrs as args;
 #[macro_use]
 mod macros;
 
+/// Arbitrary-based helper assertions for consumer roundtrip tests.
+#[cfg(feature = "arbitrary")]
+pub mod arbitrary_checks;
 pub(crate) mod builder;
 pub(crate) mod color;
 pub mod completions;
 pub(crate) mod config_format;
 pub(crate) mod config_value;
 pub(crate) mod config_value_parser;
-/// Arbitrary-based helper assertions for consumer roundtrip tests.
-#[cfg(feature = "arbitrary")]
-pub mod arbitrary_checks;
 pub(crate) mod diagnostics;
 pub(crate) mod driver;
 pub(crate) mod dump;

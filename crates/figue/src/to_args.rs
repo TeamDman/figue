@@ -48,12 +48,17 @@ impl core::fmt::Display for ToArgsError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             ToArgsError::SchemaBuild(message) => write!(f, "failed to build schema: {message}"),
-            ToArgsError::Serialize(message) => write!(f, "failed to serialize CLI value: {message}"),
+            ToArgsError::Serialize(message) => {
+                write!(f, "failed to serialize CLI value: {message}")
+            }
             ToArgsError::InvalidRootValue => {
                 write!(f, "top-level value must serialize to an object")
             }
             ToArgsError::InvalidSubcommandValue { field_name } => {
-                write!(f, "subcommand field `{field_name}` must serialize to an enum")
+                write!(
+                    f,
+                    "subcommand field `{field_name}` must serialize to an enum"
+                )
             }
             ToArgsError::UnknownSubcommandVariant {
                 field_name,
@@ -109,7 +114,8 @@ pub fn to_args_string<T: Facet<'static> + ?Sized>(value: &T) -> Result<String, T
 pub fn to_args_string_with_current_exe<T: Facet<'static> + ?Sized>(
     value: &T,
 ) -> Result<String, ToArgsError> {
-    let exe = std::env::current_exe().map_err(|error| ToArgsError::CurrentExe(error.to_string()))?;
+    let exe =
+        std::env::current_exe().map_err(|error| ToArgsError::CurrentExe(error.to_string()))?;
     let exe_display = exe.to_string_lossy().to_string();
     let args = to_args_string(value)?;
 
@@ -315,13 +321,11 @@ fn value_to_cli_token(name: &str, value: &ConfigValue) -> Result<String, ToArgsE
         ConfigValue::Enum(sourced) if sourced.value.fields.is_empty() => {
             Ok(sourced.value.variant.to_kebab_case())
         }
-        ConfigValue::Object(sourced) if sourced.value.len() == 1 => Ok(
-            sourced
-                .value
-                .first()
-                .map(|(variant, _)| variant.to_kebab_case())
-                .unwrap_or_default(),
-        ),
+        ConfigValue::Object(sourced) if sourced.value.len() == 1 => Ok(sourced
+            .value
+            .first()
+            .map(|(variant, _)| variant.to_kebab_case())
+            .unwrap_or_default()),
         _ => Err(ToArgsError::UnsupportedScalarValue {
             arg_name: name.to_string(),
         }),
@@ -388,10 +392,11 @@ mod tests {
             .map(|arg| arg.to_string_lossy().to_string())
             .collect::<Vec<_>>();
 
-        let parsed: Cli = crate::from_slice(&args_as_str.iter().map(String::as_str).collect::<Vec<_>>())
-            .into_result()
-            .expect("roundtrip parse should succeed")
-            .get_silent();
+        let parsed: Cli =
+            crate::from_slice(&args_as_str.iter().map(String::as_str).collect::<Vec<_>>())
+                .into_result()
+                .expect("roundtrip parse should succeed")
+                .get_silent();
 
         assert_eq!(cli, parsed);
     }
@@ -416,8 +421,8 @@ mod tests {
             command: Command::Build { release: false },
         };
 
-        let command =
-            to_args_string_with_current_exe(&cli).expect("to_args_string_with_current_exe should succeed");
+        let command = to_args_string_with_current_exe(&cli)
+            .expect("to_args_string_with_current_exe should succeed");
         let exe_display = std::env::current_exe()
             .expect("current_exe should resolve")
             .to_string_lossy()
@@ -462,6 +467,9 @@ mod tests {
         let mut args = Vec::new();
         let error = encode_level(schema.args(), &root, &mut args).expect_err("should fail");
 
-        assert!(matches!(error, ToArgsError::UnknownSubcommandVariant { .. }));
+        assert!(matches!(
+            error,
+            ToArgsError::UnknownSubcommandVariant { .. }
+        ));
     }
 }

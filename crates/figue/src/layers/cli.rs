@@ -444,8 +444,9 @@ impl<'a> ParseContext<'a> {
             });
 
             // Determine target and flag info
-            let (target, name, is_bool, is_counted, is_multiple) =
-                if let Some((name, arg_schema)) = found {
+            let (target, name, is_bool, is_counted, is_multiple) = if let Some((name, arg_schema)) =
+                found
+            {
                 let is_counted = matches!(arg_schema.kind(), ArgKind::Named { counted: true, .. });
                 let is_bool = arg_schema
                     .value()
@@ -535,29 +536,29 @@ impl<'a> ParseContext<'a> {
         // Determine target and flag info
         let (target, name, is_bool, is_counted, is_multiple) =
             if let Some((name, arg_schema)) = found {
-            let is_counted = matches!(arg_schema.kind(), ArgKind::Named { counted: true, .. });
-            let is_bool = arg_schema.value().inner_if_option().is_bool();
-            let is_multiple = arg_schema.multiple();
-            (
-                InsertTarget::Current,
-                name.to_string(),
-                is_bool,
-                is_counted,
-                is_multiple,
-            )
-        } else if let Some(lookup) = self.find_short_flag_in_parents(ch) {
-            // Adoption agency: flag found in parent level
-            (
-                InsertTarget::Parent(lookup.parent_idx),
-                lookup.effective_name,
-                lookup.is_bool,
-                lookup.is_counted,
-                lookup.is_multiple,
-            )
-        } else {
-            self.emit_error(format!("unknown flag: -{}", ch));
-            return;
-        };
+                let is_counted = matches!(arg_schema.kind(), ArgKind::Named { counted: true, .. });
+                let is_bool = arg_schema.value().inner_if_option().is_bool();
+                let is_multiple = arg_schema.multiple();
+                (
+                    InsertTarget::Current,
+                    name.to_string(),
+                    is_bool,
+                    is_counted,
+                    is_multiple,
+                )
+            } else if let Some(lookup) = self.find_short_flag_in_parents(ch) {
+                // Adoption agency: flag found in parent level
+                (
+                    InsertTarget::Parent(lookup.parent_idx),
+                    lookup.effective_name,
+                    lookup.is_bool,
+                    lookup.is_counted,
+                    lookup.is_multiple,
+                )
+            } else {
+                self.emit_error(format!("unknown flag: -{}", ch));
+                return;
+            };
 
         if is_counted {
             self.increment_counted_to(target, &name);
@@ -760,42 +761,40 @@ impl<'a> ParseContext<'a> {
     }
 
     fn try_parse_subcommand(&mut self, level: &'a ArgLevelSchema) -> bool {
-        let Some(field_name) = level.subcommand_field_name() else {
-            return false;
-        };
-
         let arg = self.args[self.index];
 
-        // Find subcommand by comparing user input with kebab-case of effective_name
-        let subcommand = level
-            .subcommands()
-            .iter()
-            .find(|(name, _)| name.to_kebab_case() == arg);
+        if let Some(field_name) = level.subcommand_field_name() {
+            // Find subcommand by comparing user input with kebab-case of effective_name
+            let subcommand = level
+                .subcommands()
+                .iter()
+                .find(|(name, _)| name.to_kebab_case() == arg);
 
-        if let Some((_, subcommand)) = subcommand {
-            self.index += 1;
-            let fields = self.parse_subcommand_args(level, subcommand);
+            if let Some((_, subcommand)) = subcommand {
+                self.index += 1;
+                let fields = self.parse_subcommand_args(level, subcommand);
 
-            // For flattened tuple variants like `Install(#[facet(flatten)] InstallOptions)`,
-            // the fields are already flat (they came from the inner struct's schema).
-            // We do NOT wrap them in a "0" key - the deserializer handles the routing.
-            // See module-level docs for the ConfigValue model.
-            let _ = subcommand.is_flattened_tuple(); // Acknowledge the flag exists but don't use it here
+                // For flattened tuple variants like `Install(#[facet(flatten)] InstallOptions)`,
+                // the fields are already flat (they came from the inner struct's schema).
+                // We do NOT wrap them in a "0" key - the deserializer handles the routing.
+                // See module-level docs for the ConfigValue model.
+                let _ = subcommand.is_flattened_tuple(); // Acknowledge the flag exists but don't use it here
 
-            // Use the effective name for deserialization - facet-format expects
-            // the effective name (respecting `#[facet(rename = "...")]`), e.g., "rm" for a
-            // variant named `Remove` with `#[facet(rename = "rm")]`.
-            let enum_value = ConfigValue::Enum(Sourced {
-                value: EnumValue {
-                    variant: subcommand.effective_name().to_string(),
-                    fields,
-                },
-                span: None,
-                provenance: Some(Provenance::cli(arg, "")),
-            });
+                // Use the effective name for deserialization - facet-format expects
+                // the effective name (respecting `#[facet(rename = "...")]`), e.g., "rm" for a
+                // variant named `Remove` with `#[facet(rename = "rm")].
+                let enum_value = ConfigValue::Enum(Sourced {
+                    value: EnumValue {
+                        variant: subcommand.effective_name().to_string(),
+                        fields,
+                    },
+                    span: None,
+                    provenance: Some(Provenance::cli(arg, "")),
+                });
 
-            self.result.insert(field_name.to_string(), enum_value);
-            return true;
+                self.result.insert(field_name.to_string(), enum_value);
+                return true;
+            }
         }
 
         if self.try_parse_help_pseudo_subcommand(level) {
@@ -1116,8 +1115,10 @@ impl<'a> ParseContext<'a> {
                         });
                         let old = core::mem::replace(existing, placeholder);
                         let wrapper_span = old.span().or(value.span());
-                        let wrapper_provenance =
-                            old.provenance().cloned().or_else(|| value.provenance().cloned());
+                        let wrapper_provenance = old
+                            .provenance()
+                            .cloned()
+                            .or_else(|| value.provenance().cloned());
                         *existing = ConfigValue::Array(Sourced {
                             value: vec![old, value],
                             span: wrapper_span,
@@ -2956,6 +2957,49 @@ mod tests {
             #[facet(args::named)]
             force: bool,
         },
+    }
+
+    #[derive(Facet)]
+    struct AppWithBuiltinsNestedSubcommands {
+        #[facet(flatten)]
+        builtins: crate::FigueBuiltins,
+
+        #[facet(args::subcommand)]
+        command: BuiltinsRootCommand,
+    }
+
+    #[derive(Facet)]
+    #[repr(u8)]
+    #[allow(dead_code)]
+    enum BuiltinsRootCommand {
+        Home(BuiltinsHomeCommandArgs),
+    }
+
+    #[derive(Facet)]
+    struct BuiltinsHomeCommandArgs {
+        #[facet(args::subcommand)]
+        action: BuiltinsHomeAction,
+    }
+
+    #[derive(Facet)]
+    #[repr(u8)]
+    #[allow(dead_code)]
+    enum BuiltinsHomeAction {
+        Open,
+    }
+
+    #[test]
+    fn test_help_word_bubbles_from_nested_leaf_subcommand() {
+        assert_parses_to::<AppWithBuiltinsNestedSubcommands>(
+            &["home", "open", "help"],
+            cv::object([
+                ("help", cv::bool(true, "help")),
+                (
+                    "command",
+                    cv::enumv("Home", [("action", cv::enumv("Open", []))]),
+                ),
+            ]),
+        );
     }
 
     #[derive(Facet)]

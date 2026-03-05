@@ -452,7 +452,10 @@ fn test_subcommand_flatten_positional_vec_error_path_is_consistent() {
 
     if let Err(err) = &one {
         let msg = err.to_string();
-        assert!(msg.contains("tasks"), "error should reference tasks field: {msg}");
+        assert!(
+            msg.contains("tasks"),
+            "error should reference tasks field: {msg}"
+        );
         assert!(
             msg.contains("command::Gradle.tasks") || msg.contains("command::Gradle.command.tasks"),
             "error path should include Gradle.tasks (flattened or nested form): {msg}"
@@ -461,7 +464,10 @@ fn test_subcommand_flatten_positional_vec_error_path_is_consistent() {
 
     if let Err(err) = &many {
         let msg = err.to_string();
-        assert!(msg.contains("tasks"), "error should reference tasks field: {msg}");
+        assert!(
+            msg.contains("tasks"),
+            "error should reference tasks field: {msg}"
+        );
         assert!(
             msg.contains("command::Gradle.tasks") || msg.contains("command::Gradle.command.tasks"),
             "error path should include Gradle.tasks (flattened or nested form): {msg}"

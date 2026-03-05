@@ -30,8 +30,8 @@ use crate::config_value_parser::{fill_defaults_from_schema, from_config_value};
 use crate::dump::dump_config_with_schema;
 use crate::enum_conflicts::detect_enum_conflicts;
 use crate::env_subst::{EnvSubstError, RealEnv, substitute_env_vars};
-use crate::help::generate_help_list_for_subcommand;
 use crate::help::generate_help_for_subcommand;
+use crate::help::generate_help_list_for_subcommand;
 use crate::help::implementation_source_for_subcommand_path;
 use crate::layers::{cli::parse_cli, env::parse_env, file::parse_file};
 use crate::merge::merge_layers;
@@ -253,7 +253,11 @@ impl<T: Facet<'static>> Driver<T> {
                         mode,
                     )
                 } else {
-                    generate_help_for_subcommand(&self.config.schema, &subcommand_path, &help_config)
+                    generate_help_for_subcommand(
+                        &self.config.schema,
+                        &subcommand_path,
+                        &help_config,
+                    )
                 };
                 maybe_append_implementation_source::<T>(&mut text, &help_config, &subcommand_path);
                 return DriverOutcome::err(DriverError::Help { text });
@@ -1801,7 +1805,10 @@ mod tests {
         match result {
             Ok(output) => {
                 assert_eq!(output.value.command, TestCommandWithExplicitHelp::Help);
-                assert!(!output.value.builtins.help, "builtin help flag should remain false");
+                assert!(
+                    !output.value.builtins.help,
+                    "builtin help flag should remain false"
+                );
             }
             Err(e) => panic!("expected success, got error: {:?}", e),
         }

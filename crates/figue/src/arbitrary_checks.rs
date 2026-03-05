@@ -55,11 +55,13 @@ where
     while successful_samples < samples && attempts < max_attempts {
         attempts += 1;
 
-        os_rng.try_fill_bytes(&mut data).map_err(|error| ArbitraryCheckError {
-            successful_samples,
-            attempts,
-            message: format!("failed to gather random bytes: {error}"),
-        })?;
+        os_rng
+            .try_fill_bytes(&mut data)
+            .map_err(|error| ArbitraryCheckError {
+                successful_samples,
+                attempts,
+                message: format!("failed to gather random bytes: {error}"),
+            })?;
 
         let mut rng = arbitrary::Unstructured::new(&data);
         let Ok(instance) = T::arbitrary(&mut rng) else {
@@ -214,11 +216,13 @@ where
     while successful_samples < samples && attempts < max_attempts {
         attempts += 1;
 
-        os_rng.try_fill_bytes(&mut data).map_err(|error| ArbitraryCheckError {
-            successful_samples,
-            attempts,
-            message: format!("failed to gather random bytes: {error}"),
-        })?;
+        os_rng
+            .try_fill_bytes(&mut data)
+            .map_err(|error| ArbitraryCheckError {
+                successful_samples,
+                attempts,
+                message: format!("failed to gather random bytes: {error}"),
+            })?;
 
         let mut rng = arbitrary::Unstructured::new(&data);
         let Ok(instance) = T::arbitrary(&mut rng) else {
