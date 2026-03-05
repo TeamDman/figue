@@ -30,6 +30,7 @@ use crate::config_value_parser::{fill_defaults_from_schema, from_config_value};
 use crate::dump::dump_config_with_schema;
 use crate::enum_conflicts::detect_enum_conflicts;
 use crate::env_subst::{EnvSubstError, RealEnv, substitute_env_vars};
+use crate::help::generate_help_list_for_subcommand;
 use crate::help::generate_help_for_subcommand;
 use crate::help::implementation_source_for_subcommand_path;
 use crate::layers::{cli::parse_cli, env::parse_env, file::parse_file};
@@ -60,6 +61,17 @@ pub struct LayerOutput {
     /// Config file path captured from CLI (e.g., `--config path/to/file.json`).
     /// Only set by the CLI layer when the user specifies a config file path.
     pub config_file_path: Option<camino::Utf8PathBuf>,
+    /// Requested pseudo-help list mode (from `help list` shorthand), if any.
+    pub help_list_mode: Option<HelpListMode>,
+}
+
+/// Mode for pseudo-help listing (`help list`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpListMode {
+    /// Show full help text for each immediate subcommand.
+    Full,
+    /// Show only immediate subcommand names.
+    Short,
 }
 
 /// A key that was unused by the schema, with provenance.
@@ -233,11 +245,16 @@ impl<T: Facet<'static>> Driver<T> {
                     Vec::new()
                 };
 
-                let mut text = generate_help_for_subcommand(
-                    &self.config.schema,
-                    &subcommand_path,
-                    &help_config,
-                );
+                let mut text = if let Some(mode) = layers.cli.help_list_mode {
+                    generate_help_list_for_subcommand(
+                        &self.config.schema,
+                        &subcommand_path,
+                        &help_config,
+                        mode,
+                    )
+                } else {
+                    generate_help_for_subcommand(&self.config.schema, &subcommand_path, &help_config)
+                };
                 maybe_append_implementation_source::<T>(&mut text, &help_config, &subcommand_path);
                 return DriverOutcome::err(DriverError::Help { text });
             }

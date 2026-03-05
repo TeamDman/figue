@@ -365,6 +365,7 @@ fn parse_env_no_config(env_config: &EnvConfig, source: &dyn EnvSource) -> LayerO
         diagnostics: Vec::new(),
         source_text: None,
         config_file_path: None,
+        help_list_mode: None,
     }
 }
 

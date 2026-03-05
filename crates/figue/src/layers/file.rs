@@ -362,6 +362,7 @@ impl<'a> FileParseContext<'a> {
                     diagnostics: self.early_diagnostics,
                     source_text: None,
                     config_file_path: None,
+                    help_list_mode: None,
                 }
             }
         } else {
@@ -372,6 +373,7 @@ impl<'a> FileParseContext<'a> {
                 diagnostics: self.early_diagnostics,
                 source_text: None,
                 config_file_path: None,
+                help_list_mode: None,
             }
         };
 
