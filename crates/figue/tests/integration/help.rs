@@ -303,9 +303,67 @@ fn test_help_subcommand_remove() {
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(err.is_help(), "expected help error, got: {:?}", err);
-
     let help = err.help_text().expect("should have help text");
     assert_help_snapshot!("subcommand_remove_help", help);
+}
+
+#[test]
+fn test_help_implementation_source_disabled_by_default() {
+    let result = figue::from_slice::<PkgManager>(&["--help"]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.is_help(), "expected help error, got: {:?}", err);
+
+    let help = err.help_text().expect("should have help text");
+    assert!(
+        !help.contains("Implementation:"),
+        "default help output should not include implementation section"
+    );
+}
+
+#[test]
+fn test_help_implementation_source_included_when_enabled() {
+    let config = figue::builder::<PkgManager>()
+        .expect("schema should be valid")
+        .cli(|cli| cli.args(["--help"]))
+        .help(|h| h.include_implementation_source_file(true))
+        .build();
+
+    let result = figue::Driver::new(config).run().into_result();
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.is_help(), "expected help error, got: {:?}", err);
+
+    let help = err.help_text().expect("should have help text");
+    assert!(
+        help.contains("Implementation:"),
+        "help output should include implementation section when enabled"
+    );
+    assert!(
+        help.contains("help.rs"),
+        "implementation section should point to source file"
+    );
+}
+
+#[test]
+fn test_subcommand_help_implementation_source_included_when_enabled() {
+    let config = figue::builder::<PkgManager>()
+        .expect("schema should be valid")
+        .cli(|cli| cli.args(["install", "--help"]))
+        .help(|h| h.include_implementation_source_file(true))
+        .build();
+
+    let result = figue::Driver::new(config).run().into_result();
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.is_help(), "expected help error, got: {:?}", err);
+
+    let help = err.help_text().expect("should have help text");
+    assert!(help.contains("install"), "help should be install subcommand help");
+    assert!(
+        help.contains("Implementation:"),
+        "subcommand help should include implementation section when enabled"
+    );
 }
 
 #[test]

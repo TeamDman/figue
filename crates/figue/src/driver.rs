@@ -34,7 +34,7 @@ use crate::env_subst::{EnvSubstError, RealEnv, substitute_env_vars};
 use crate::help::{
     generate_help_for_subcommand_with_config_formats,
     generate_root_html_help_with_config_formats_and_anchor, html_help_anchor_for_subcommand_path,
-    open_html_help_file, write_html_help_to_temp_file,
+    implementation_source_for_subcommand_path, open_html_help_file, write_html_help_to_temp_file,
 };
 use crate::json_schema::{JsonSchemaError, write_json_schema_files};
 use crate::layers::{cli::parse_cli, env::parse_env, file::parse_file};
@@ -251,12 +251,13 @@ impl<T: Facet<'static>> Driver<T> {
                 };
 
                 let config_file_extensions = self.config_file_extensions();
-                let text = generate_help_for_subcommand_with_config_formats(
+                let mut text = generate_help_for_subcommand_with_config_formats(
                     &self.config.schema,
                     &subcommand_path,
                     &help_config,
                     &config_file_extensions,
                 );
+                maybe_append_implementation_source::<T>(&mut text, &help_config, &subcommand_path);
                 return DriverOutcome::err(DriverError::Help {
                     text,
                     suggestion: None,
@@ -572,12 +573,13 @@ impl<T: Facet<'static>> Driver<T> {
                     .unwrap_or_default();
 
                 let config_file_extensions = self.config_file_extensions();
-                let help = generate_help_for_subcommand_with_config_formats(
+                let mut help = generate_help_for_subcommand_with_config_formats(
                     &self.config.schema,
                     &[],
                     &help_config,
                     &config_file_extensions,
                 );
+                maybe_append_implementation_source::<T>(&mut help, &help_config, &[]);
                 return DriverOutcome::err(DriverError::Help {
                     text: help,
                     suggestion: None,
@@ -879,6 +881,30 @@ fn flatten_config_roots_for_deserialization(
             }
         }
     }
+}
+
+fn maybe_append_implementation_source<T: Facet<'static>>(
+    help_text: &mut String,
+    help_config: &crate::help::HelpConfig,
+    subcommand_path: &[String],
+) {
+    if !help_config.include_implementation_source_file {
+        return;
+    }
+
+    let Some(source_file) = implementation_source_for_subcommand_path(T::SHAPE, subcommand_path)
+    else {
+        return;
+    };
+
+    if !help_text.ends_with('\n') {
+        help_text.push('\n');
+    }
+    help_text.push('\n');
+    help_text.push_str("Implementation:\n");
+    help_text.push_str("    ");
+    help_text.push_str(source_file);
+    help_text.push('\n');
 }
 
 /// Get the source name and contents for a provenance.
