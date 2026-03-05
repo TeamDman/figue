@@ -32,7 +32,7 @@ use crate::dump::dump_config_with_schema;
 use crate::enum_conflicts::detect_enum_conflicts;
 use crate::env_subst::{EnvSubstError, RealEnv, substitute_env_vars};
 use crate::help::{
-    generate_help_for_subcommand_with_config_formats,
+    generate_help_for_subcommand_with_config_formats, generate_help_list_for_subcommand,
     generate_root_html_help_with_config_formats_and_anchor, html_help_anchor_for_subcommand_path,
     implementation_source_for_subcommand_path, open_html_help_file, write_html_help_to_temp_file,
 };
@@ -68,6 +68,17 @@ pub struct LayerOutput {
     /// example, `--cfg cfg.json` should load `cfg.json` as the `cfg` block, not
     /// as a top-level file containing every config root.
     pub config_file_paths: indexmap::IndexMap<String, camino::Utf8PathBuf>,
+    /// Requested pseudo-help list mode (from `help list` shorthand), if any.
+    pub help_list_mode: Option<HelpListMode>,
+}
+
+/// Mode for pseudo-help listing (`help list`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpListMode {
+    /// Show full help text for each immediate subcommand.
+    Full,
+    /// Show only immediate subcommand names.
+    Short,
 }
 
 /// A key that was unused by the schema, with provenance.
@@ -251,12 +262,21 @@ impl<T: Facet<'static>> Driver<T> {
                 };
 
                 let config_file_extensions = self.config_file_extensions();
-                let mut text = generate_help_for_subcommand_with_config_formats(
-                    &self.config.schema,
-                    &subcommand_path,
-                    &help_config,
-                    &config_file_extensions,
-                );
+                let mut text = if let Some(mode) = layers.cli.help_list_mode {
+                    generate_help_list_for_subcommand(
+                        &self.config.schema,
+                        &subcommand_path,
+                        &help_config,
+                        mode,
+                    )
+                } else {
+                    generate_help_for_subcommand_with_config_formats(
+                        &self.config.schema,
+                        &subcommand_path,
+                        &help_config,
+                        &config_file_extensions,
+                    )
+                };
                 maybe_append_implementation_source::<T>(&mut text, &help_config, &subcommand_path);
                 return DriverOutcome::err(DriverError::Help {
                     text,

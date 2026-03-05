@@ -36,7 +36,7 @@ use heck::ToKebabCase;
 use indexmap::IndexMap;
 
 use crate::config_value::{ConfigValue, EnumValue, Sourced};
-use crate::driver::{Diagnostic, LayerOutput, Severity};
+use crate::driver::{Diagnostic, HelpListMode, LayerOutput, Severity};
 use crate::provenance::Provenance;
 use crate::schema::{
     ArgKind, ArgLevelSchema, ArgSchema, ConfigStructSchema, ConfigValueSchema, Schema, Subcommand,
@@ -230,6 +230,8 @@ struct ParseContext<'a> {
     config_builders: IndexMap<String, ValueBuilder<'a>, RandomState>,
     /// Config file paths captured by config root.
     config_file_paths: IndexMap<String, camino::Utf8PathBuf, RandomState>,
+    /// Requested pseudo-help list mode (`help list`), if any.
+    help_list_mode: Option<HelpListMode>,
 }
 
 impl<'a> ParseContext<'a> {
@@ -269,6 +271,7 @@ impl<'a> ParseContext<'a> {
             parent_stack: Vec::new(),
             config_builders,
             config_file_paths: IndexMap::default(),
+            help_list_mode: None,
         }
     }
 
@@ -1126,10 +1129,15 @@ impl<'a> ParseContext<'a> {
         }
 
         // Otherwise, treat `help` as shorthand for `--help` if a bool help flag exists.
+        let list_mode = self.parse_help_list_mode();
+
         if let Some((_effective_name, arg_schema)) = level.args().get("help")
             && matches!(arg_schema.kind(), ArgKind::Named { .. })
             && arg_schema.value().inner_if_option().is_bool()
         {
+            if let Some(mode) = list_mode {
+                self.help_list_mode = Some(mode);
+            }
             self.parse_flag_value_simple(
                 arg,
                 InsertTarget::Current,
@@ -1139,12 +1147,22 @@ impl<'a> ParseContext<'a> {
                 None,
                 None,
             );
+            if list_mode.is_some() {
+                self.index += if list_mode == Some(HelpListMode::Short) {
+                    2
+                } else {
+                    1
+                };
+            }
             return true;
         }
 
         if let Some(lookup) = self.find_long_flag_in_parents("help")
             && lookup.is_bool
         {
+            if let Some(mode) = list_mode {
+                self.help_list_mode = Some(mode);
+            }
             self.parse_flag_value_simple(
                 arg,
                 InsertTarget::Parent(lookup.parent_idx),
@@ -1154,10 +1172,29 @@ impl<'a> ParseContext<'a> {
                 None,
                 None,
             );
+            if list_mode.is_some() {
+                self.index += if list_mode == Some(HelpListMode::Short) {
+                    2
+                } else {
+                    1
+                };
+            }
             return true;
         }
 
         false
+    }
+
+    fn parse_help_list_mode(&self) -> Option<HelpListMode> {
+        let next = self.args.get(self.index + 1)?;
+        if *next != "list" {
+            return None;
+        }
+
+        match self.args.get(self.index + 2) {
+            Some(flag) if *flag == "--short" => Some(HelpListMode::Short),
+            _ => Some(HelpListMode::Full),
+        }
     }
 
     fn parse_subcommand_args(
@@ -1563,6 +1600,7 @@ impl<'a> ParseContext<'a> {
             diagnostics,
             source_text: None,
             config_file_paths: self.config_file_paths,
+            help_list_mode: self.help_list_mode,
         }
     }
 }
@@ -3432,6 +3470,22 @@ mod tests {
     fn test_help_word_acts_like_help_flag_when_no_help_subcommand() {
         assert_parses_to::<AppWithBuiltins>(
             &["help"],
+            cv::object([("help", cv::bool(true, "help"))]),
+        );
+    }
+
+    #[test]
+    fn test_help_list_word_acts_like_help_flag_when_no_help_subcommand() {
+        assert_parses_to::<AppWithBuiltins>(
+            &["help", "list"],
+            cv::object([("help", cv::bool(true, "help"))]),
+        );
+    }
+
+    #[test]
+    fn test_help_list_short_word_acts_like_help_flag_when_no_help_subcommand() {
+        assert_parses_to::<AppWithBuiltins>(
+            &["help", "list", "--short"],
             cv::object([("help", cv::bool(true, "help"))]),
         );
     }

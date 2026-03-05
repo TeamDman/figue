@@ -4,6 +4,7 @@
 //! including doc comments, field names, and attribute information.
 
 use crate::missing::normalize_program_name;
+use crate::driver::HelpListMode;
 use crate::schema::{
     ArgLevelSchema, ArgSchema, ConfigFieldGroupSchema, ConfigFieldSchema, ConfigStructSchema,
     ConfigValueSchema, Docs, Schema, Subcommand,
@@ -407,6 +408,97 @@ pub(crate) fn generate_help_for_subcommand_with_config_formats(
     }
 
     generate_help_for_subcommand_level(current_args, final_sub, &command_path.join(" "), config)
+}
+
+/// Generate help-list output for subcommands at the current command level.
+///
+/// In [`HelpListMode::Short`], this returns one CLI subcommand name per line.
+/// In [`HelpListMode::Full`], this returns concatenated help output for each
+/// immediate subcommand under the current command path.
+pub(crate) fn generate_help_list_for_subcommand(
+    schema: &Schema,
+    subcommand_path: &[String],
+    config: &HelpConfig,
+    mode: HelpListMode,
+) -> String {
+    let program_name = config
+        .program_name
+        .clone()
+        .or_else(|| {
+            std::env::args()
+                .next()
+                .map(|path| normalize_program_name(&path))
+        })
+        .unwrap_or_else(|| "program".to_string());
+
+    let mut current_args = schema.args();
+    let mut resolved_path = Vec::new();
+
+    for name in subcommand_path {
+        let sub = current_args
+            .subcommands()
+            .values()
+            .find(|s| s.effective_name() == name);
+
+        let Some(sub) = sub else {
+            // Fall back to regular root help if the path cannot be resolved.
+            return generate_help_for_subcommand(schema, &[], config);
+        };
+
+        resolved_path.push(sub.effective_name().to_string());
+        current_args = sub.args();
+    }
+
+    if !current_args.has_subcommands() {
+        let command_display = if resolved_path.is_empty() {
+            program_name
+        } else {
+            let cli_chain = resolve_cli_chain(schema, &resolved_path);
+            if cli_chain.is_empty() {
+                program_name
+            } else {
+                format!("{} {}", program_name, cli_chain.join(" "))
+            }
+        };
+        return format!("No subcommands available for {command_display}.");
+    }
+
+    match mode {
+        HelpListMode::Short => current_args
+            .subcommands()
+            .values()
+            .map(|sub| sub.cli_name().to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        HelpListMode::Full => {
+            let mut sections = Vec::new();
+            for sub in current_args.subcommands().values() {
+                let mut child_path = resolved_path.clone();
+                child_path.push(sub.effective_name().to_string());
+                sections.push(generate_help_for_subcommand(schema, &child_path, config));
+            }
+            sections.join("\n\n")
+        }
+    }
+}
+
+fn resolve_cli_chain(schema: &Schema, subcommand_path: &[String]) -> Vec<String> {
+    let mut current_args = schema.args();
+    let mut cli_path = Vec::new();
+
+    for name in subcommand_path {
+        let sub = current_args
+            .subcommands()
+            .values()
+            .find(|s| s.effective_name() == name);
+        let Some(sub) = sub else {
+            break;
+        };
+        cli_path.push(sub.cli_name().to_string());
+        current_args = sub.args();
+    }
+
+    cli_path
 }
 
 /// Generate help from a built Schema.

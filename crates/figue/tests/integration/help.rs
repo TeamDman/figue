@@ -412,6 +412,39 @@ fn test_html_help_after_subcommand_still_writes_root_document() {
     assert!(html.contains("window.FIGUE_INITIAL_ANCHOR = \"command-install\""));
 }
 
+#[test]
+fn test_help_list_short_root_shows_immediate_subcommands() {
+    let result = figue::from_slice::<PkgManager>(&["help", "list", "--short"]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.is_help(), "expected help error, got: {:?}", err);
+
+    let help = err.help_text().expect("should have help text");
+    assert!(help.contains("install"), "short list should include install");
+    assert!(help.contains("rm"), "short list should include rm");
+    assert!(help.contains("ls"), "short list should include ls");
+    assert!(
+        !help.contains("--global"),
+        "short list should not include flag details"
+    );
+}
+
+#[test]
+fn test_help_list_root_shows_subcommand_helps() {
+    let result = figue::from_slice::<PkgManager>(&["help", "list"]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.is_help(), "expected help error, got: {:?}", err);
+
+    let help = err.help_text().expect("should have help text");
+    assert!(help.contains("install"), "full list should include install help");
+    assert!(help.contains("--global"), "full list should include install flags");
+    assert!(help.contains("rm"), "full list should include rm help");
+    assert!(help.contains("--yes"), "full list should include rm flags");
+    assert!(help.contains("ls"), "full list should include ls help");
+    assert!(help.contains("--json"), "full list should include ls flags");
+}
+
 // Nested subcommands: help should be aware of the full path
 #[derive(Facet, Debug)]
 struct NestedCli {
@@ -502,6 +535,22 @@ fn test_help_nested_intermediate_level() {
 
     let help = err.help_text().expect("should have help text");
     assert_help_snapshot!("nested_intermediate_repo_help", help);
+}
+
+#[test]
+fn test_help_list_short_nested_shows_immediate_subcommands() {
+    let result = figue::from_slice::<NestedCli>(&["repo", "help", "list", "--short"]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.is_help(), "expected help error, got: {:?}", err);
+
+    let help = err.help_text().expect("should have help text");
+    assert!(help.contains("clone"), "nested short list should include clone");
+    assert!(help.contains("push"), "nested short list should include push");
+    assert!(
+        !help.contains("--force"),
+        "nested short list should not include flag details"
+    );
 }
 
 #[test]

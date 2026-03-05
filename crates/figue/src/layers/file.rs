@@ -398,6 +398,7 @@ impl<'a> FileParseContext<'a> {
                     diagnostics: self.early_diagnostics,
                     source_text: None,
                     config_file_paths: IndexMap::default(),
+                    help_list_mode: None,
                 }
             }
         } else {
@@ -408,6 +409,7 @@ impl<'a> FileParseContext<'a> {
                 diagnostics: self.early_diagnostics,
                 source_text: None,
                 config_file_paths: IndexMap::default(),
+                help_list_mode: None,
             }
         };
 
@@ -441,6 +443,7 @@ impl<'a> FileParseContext<'a> {
                 diagnostics,
                 source_text: None,
                 config_file_paths: IndexMap::default(),
+                help_list_mode: None,
             };
         };
 
@@ -490,6 +493,7 @@ impl<'a> FileParseContext<'a> {
             diagnostics,
             source_text: None,
             config_file_paths: IndexMap::default(),
+            help_list_mode: None,
         }
     }
 
@@ -539,6 +543,7 @@ impl<'a> FileParseContext<'a> {
             diagnostics,
             source_text: None,
             config_file_paths: IndexMap::default(),
+            help_list_mode: None,
         }
     }
 }
