@@ -120,6 +120,7 @@ fn test_consumer_helper_assert_to_args_consistency() {
 #[cfg(feature = "arbitrary")]
 #[test]
 fn test_consumer_helper_assert_to_args_roundtrip() {
-    figue::assert_to_args_roundtrip::<Cli>(figue::TestToArgsRoundTrip::default())
-        .expect("consumer helper roundtrip check should pass");
+    if let Err(e) = figue::assert_to_args_roundtrip::<Cli>(figue::TestToArgsRoundTrip::default()) {
+        panic!("CLI argument roundtrip check failed: {e}")
+    }
 }
