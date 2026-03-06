@@ -96,7 +96,10 @@ fn test_clean_command_hint_includes_full_invocation() {
         hint.contains("If you're having trouble with your builds"),
         "hint should include support message"
     );
-    assert!(hint.contains("clean"), "hint should include clean subcommand");
+    assert!(
+        hint.contains("clean"),
+        "hint should include clean subcommand"
+    );
     assert_eq!(args_string, "clean", "args_string should only include args");
     assert!(
         hint.contains(&exe_display),
@@ -107,13 +110,15 @@ fn test_clean_command_hint_includes_full_invocation() {
 #[cfg(feature = "arbitrary")]
 #[test]
 fn test_consumer_helper_assert_to_args_consistency() {
-    figue::assert_to_args_consistency::<Cli>(8)
-        .expect("consumer helper consistency check should pass");
+    if let Err(e) = figue::assert_to_args_consistency::<Cli>(8) {
+        panic!("CLI argument consistency check failed: {e}")
+    }
 }
 
 #[cfg(feature = "arbitrary")]
 #[test]
 fn test_consumer_helper_assert_to_args_roundtrip() {
-    figue::assert_to_args_roundtrip::<Cli>(4)
-        .expect("consumer helper roundtrip check should pass");
+    if let Err(e) = figue::assert_to_args_roundtrip::<Cli>(4) {
+        panic!("CLI argument roundtrip check failed: {e}")
+    }
 }
