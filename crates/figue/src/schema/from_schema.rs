@@ -10,7 +10,7 @@ use crate::{
     },
 };
 use facet::{
-    Def, EnumType, Facet, Field, ScalarType as FacetScalarType, Shape, StructKind, Type, UserType,
+    Def, EnumType, Facet, Field, ScalarType as FacetScalarType, Shape, Type, UserType,
     Variant,
 };
 use heck::ToKebabCase;
@@ -286,6 +286,13 @@ fn value_schema_from_shape(
     shape: &'static Shape,
     ctx: &SchemaErrorContext,
 ) -> Result<ValueSchema, SchemaError> {
+    if shape.is_transparent()
+        && let Some(inner) = shape.inner
+        && !std::ptr::eq(inner, shape)
+    {
+        return value_schema_from_shape(inner, ctx);
+    }
+
     match shape.def {
         Def::Option(opt) => Ok(ValueSchema::Option {
             value: Box::new(value_schema_from_shape(opt.t, ctx)?),
@@ -309,6 +316,13 @@ fn config_value_schema_from_shape(
     shape: &'static Shape,
     ctx: &SchemaErrorContext,
 ) -> Result<ConfigValueSchema, SchemaError> {
+    if shape.is_transparent()
+        && let Some(inner) = shape.inner
+        && !std::ptr::eq(inner, shape)
+    {
+        return config_value_schema_from_shape(inner, ctx);
+    }
+
     match shape.def {
         Def::Option(opt) => Ok(ConfigValueSchema::Option {
             value: Box::new(config_value_schema_from_shape(opt.t, ctx)?),
@@ -555,12 +569,9 @@ fn variant_fields_for_schema(variant: &Variant) -> &'static [Field] {
 /// E.g., `Bench(BenchArgs)` where `BenchArgs` is a struct.
 fn is_flattened_tuple_variant(variant: &Variant) -> bool {
     let fields = variant.data.fields;
-    if variant.data.kind == StructKind::TupleStruct && fields.len() == 1 {
-        let inner_shape = fields[0].shape();
-        matches!(inner_shape.ty, Type::User(UserType::Struct(_)))
-    } else {
-        false
-    }
+    fields.len() == 1
+        && fields[0].name.chars().all(|c| c.is_ascii_digit())
+        && matches!(fields[0].shape().ty, Type::User(UserType::Struct(_)))
 }
 
 fn arg_level_from_fields(

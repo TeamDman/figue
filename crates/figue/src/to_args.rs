@@ -1,11 +1,12 @@
 use std::ffi::OsString;
 
 use facet_core::Facet;
+use facet_core::ScalarType as FacetScalarType;
 use heck::ToKebabCase;
 
 use crate::config_value::{ConfigValue, ObjectMap};
 use crate::config_value_parser::ConfigValueSerializer;
-use crate::schema::{ArgKind, ArgLevelSchema, ArgSchema, Schema};
+use crate::schema::{ArgKind, ArgLevelSchema, ArgSchema, Schema, ValueSchema};
 
 /// Error type for converting a typed CLI value back into command-line arguments.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -185,6 +186,7 @@ fn encode_level(
         encode_named_arg(name, schema, value, args)?;
     }
 
+    let mut emitted_positional_separator = false;
     for (name, schema) in level.args() {
         if !matches!(schema.kind(), ArgKind::Positional) {
             continue;
@@ -192,7 +194,13 @@ fn encode_level(
         let Some(value) = values.get(name) else {
             continue;
         };
-        encode_positional_arg(name, value, args)?;
+        encode_positional_arg(
+            name,
+            schema,
+            value,
+            args,
+            &mut emitted_positional_separator,
+        )?;
     }
 
     if let Some(field_name) = level.subcommand_field_name()
@@ -278,21 +286,23 @@ fn encode_named_arg(
             }
 
             args.push(flag.clone().into());
-            args.push(value_to_cli_token(name, item)?.into());
+            args.push(value_to_cli_token(name, item, Some(schema.value().inner_if_option()))?.into());
         }
 
         return Ok(());
     }
 
     args.push(flag.into());
-    args.push(value_to_cli_token(name, value)?.into());
+    args.push(value_to_cli_token(name, value, Some(schema.value().inner_if_option()))?.into());
     Ok(())
 }
 
 fn encode_positional_arg(
     name: &str,
+    schema: &ArgSchema,
     value: &ConfigValue,
     args: &mut Vec<OsString>,
+    emitted_positional_separator: &mut bool,
 ) -> Result<(), ToArgsError> {
     match value {
         ConfigValue::Null(_) => Ok(()),
@@ -301,21 +311,40 @@ fn encode_positional_arg(
                 if matches!(item, ConfigValue::Null(_)) {
                     continue;
                 }
-                args.push(value_to_cli_token(name, item)?.into());
+                let token = value_to_cli_token(name, item, Some(schema.value().inner_if_option()))?;
+                maybe_emit_positional_separator(args, &token, emitted_positional_separator);
+                args.push(token.into());
             }
             Ok(())
         }
         _ => {
-            args.push(value_to_cli_token(name, value)?.into());
+            let token = value_to_cli_token(name, value, Some(schema.value().inner_if_option()))?;
+            maybe_emit_positional_separator(args, &token, emitted_positional_separator);
+            args.push(token.into());
             Ok(())
         }
     }
 }
 
-fn value_to_cli_token(name: &str, value: &ConfigValue) -> Result<String, ToArgsError> {
+fn maybe_emit_positional_separator(
+    args: &mut Vec<OsString>,
+    token: &str,
+    emitted_positional_separator: &mut bool,
+) {
+    if !*emitted_positional_separator && (token == "--" || token.starts_with('-')) {
+        args.push("--".into());
+        *emitted_positional_separator = true;
+    }
+}
+
+fn value_to_cli_token(
+    name: &str,
+    value: &ConfigValue,
+    value_schema: Option<&ValueSchema>,
+) -> Result<String, ToArgsError> {
     match value {
         ConfigValue::Bool(sourced) => Ok(sourced.value.to_string()),
-        ConfigValue::Integer(sourced) => Ok(sourced.value.to_string()),
+        ConfigValue::Integer(sourced) => Ok(integer_to_cli_token(sourced.value, value_schema)),
         ConfigValue::Float(sourced) => Ok(sourced.value.to_string()),
         ConfigValue::String(sourced) => Ok(sourced.value.clone()),
         ConfigValue::Enum(sourced) if sourced.value.fields.is_empty() => {
@@ -329,6 +358,23 @@ fn value_to_cli_token(name: &str, value: &ConfigValue) -> Result<String, ToArgsE
         _ => Err(ToArgsError::UnsupportedScalarValue {
             arg_name: name.to_string(),
         }),
+    }
+}
+
+fn integer_to_cli_token(value: i64, value_schema: Option<&ValueSchema>) -> String {
+    let scalar = match value_schema {
+        Some(ValueSchema::Leaf(leaf)) => leaf.shape.scalar_type(),
+        _ => None,
+    };
+
+    match scalar {
+        Some(FacetScalarType::U8) => (value as u8).to_string(),
+        Some(FacetScalarType::U16) => (value as u16).to_string(),
+        Some(FacetScalarType::U32) => (value as u32).to_string(),
+        Some(FacetScalarType::U64) => (value as u64).to_string(),
+        Some(FacetScalarType::U128) => ((value as u64) as u128).to_string(),
+        Some(FacetScalarType::USize) => (value as usize).to_string(),
+        _ => value.to_string(),
     }
 }
 
@@ -377,6 +423,18 @@ mod tests {
 
         #[facet(args::subcommand)]
         command: Command,
+    }
+
+    #[derive(Facet, Debug, PartialEq)]
+    struct UnsignedCli {
+        #[facet(args::named)]
+        limit: usize,
+    }
+
+    #[derive(Facet, Debug, PartialEq)]
+    struct DashPositionalCli {
+        #[facet(args::positional)]
+        query: String,
     }
 
     #[test]
@@ -430,6 +488,59 @@ mod tests {
 
         assert!(command.starts_with(&exe_display));
         assert!(command.contains("build"));
+    }
+
+    #[test]
+    fn to_args_roundtrips_large_usize_values() {
+        if usize::BITS < 64 {
+            return;
+        }
+
+        let cli = UnsignedCli {
+            limit: usize::MAX,
+        };
+
+        let args = to_os_args(&cli).expect("to_args should succeed for large usize values");
+        let args_as_str = args
+            .iter()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+
+        assert!(
+            args_as_str.contains(&usize::MAX.to_string()),
+            "generated args should preserve the original unsigned value"
+        );
+
+        let parsed: UnsignedCli =
+            crate::from_slice(&args_as_str.iter().map(String::as_str).collect::<Vec<_>>())
+                .into_result()
+                .expect("roundtrip parse should succeed")
+                .get_silent();
+
+        assert_eq!(cli, parsed);
+    }
+
+    #[test]
+    fn to_args_inserts_separator_for_dash_prefixed_positionals() {
+        let cli = DashPositionalCli {
+            query: "-0".to_string(),
+        };
+
+        let args = to_os_args(&cli).expect("to_args should succeed");
+        let args_as_str = args
+            .iter()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(args_as_str, vec!["--", "-0"]);
+
+        let parsed: DashPositionalCli =
+            crate::from_slice(&args_as_str.iter().map(String::as_str).collect::<Vec<_>>())
+                .into_result()
+                .expect("roundtrip parse should succeed")
+                .get_silent();
+
+        assert_eq!(cli, parsed);
     }
 
     #[test]

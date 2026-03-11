@@ -429,6 +429,16 @@ struct ArgsWithUnflattenedStruct {
     options: NestedOptions, // ERROR: struct fields must use flatten
 }
 
+#[derive(Facet)]
+#[facet(transparent)]
+struct TransparentPattern(String);
+
+#[derive(Facet)]
+struct ArgsWithTransparentNewtype {
+    #[facet(args::named)]
+    pattern: TransparentPattern,
+}
+
 #[test]
 fn test_struct_field_without_flatten_is_error() {
     let result = Schema::from_shape(ArgsWithUnflattenedStruct::SHAPE);
@@ -438,6 +448,17 @@ fn test_struct_field_without_flatten_is_error() {
         err.contains("flatten"),
         "error should mention flatten: {}",
         err
+    );
+}
+
+#[test]
+fn test_transparent_newtype_arg_is_allowed() {
+    let schema = Schema::from_shape(ArgsWithTransparentNewtype::SHAPE)
+        .expect("transparent newtype args should be treated like their inner leaf type");
+
+    assert!(
+        schema.args().args.contains_key("pattern"),
+        "transparent newtype field should appear as a regular named arg"
     );
 }
 
