@@ -110,13 +110,9 @@ fn test_clean_command_hint_includes_full_invocation() {
 #[cfg(feature = "arbitrary")]
 #[test]
 fn test_consumer_helper_assert_to_args_consistency() {
-    let config = figue::TestToArgsConsistencyConfig {
-        success_count: 8,
-        max_attempts: 8 * 20,
-        ..Default::default()
-    };
-
-    if let Err(e) = figue::assert_to_args_consistency::<Cli>(config) {
+    if let Err(e) = figue::assert_to_args_consistency::<Cli>(
+        figue::TestToArgsConsistencyConfig::default(),
+    ) {
         panic!("CLI argument consistency check failed: {e}")
     }
 }
@@ -124,14 +120,6 @@ fn test_consumer_helper_assert_to_args_consistency() {
 #[cfg(feature = "arbitrary")]
 #[test]
 fn test_consumer_helper_assert_to_args_roundtrip() {
-    let config = figue::TestToArgsRoundTrip {
-        success_count_per_leaf: 4,
-        success_count_global: 4,
-        max_attempts_per_leaf: 4 * 30_000,
-        max_attempts_global: 4 * 40,
-        ..Default::default()
-    };
-
-    figue::assert_to_args_roundtrip::<Cli>(config)
+    figue::assert_to_args_roundtrip::<Cli>(figue::TestToArgsRoundTrip::default())
         .expect("consumer helper roundtrip check should pass");
 }

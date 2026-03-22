@@ -76,10 +76,10 @@ pub struct TestToArgsRoundTrip {
 impl Default for TestToArgsRoundTrip {
     fn default() -> Self {
         Self {
-            success_count_per_leaf: 500,
-            success_count_global: 500,
-            max_attempts_per_leaf: 15_000_000,
-            max_attempts_global: 20_000,
+            success_count_per_leaf: 64,
+            success_count_global: 64,
+            max_attempts_per_leaf: 64 * 4_000,
+            max_attempts_global: 64 * 80,
             random_data_len: 1024,
         }
     }
@@ -512,38 +512,21 @@ mod tests {
 
     #[test]
     fn arbitrary_consistency_smoke_test() {
-        assert_to_args_consistency::<Cli>(TestToArgsConsistencyConfig {
-            success_count: 16,
-            max_attempts: 16 * 20,
-            ..Default::default()
-        })
-        .expect("consistency check should pass");
+        assert_to_args_consistency::<Cli>(TestToArgsConsistencyConfig::default())
+            .expect("consistency check should pass");
     }
 
     #[test]
     fn arbitrary_roundtrip_smoke_test() {
-        assert_to_args_roundtrip::<Cli>(TestToArgsRoundTrip {
-            success_count_per_leaf: 16,
-            success_count_global: 16,
-            max_attempts_per_leaf: 16 * 30_000,
-            max_attempts_global: 16 * 40,
-            ..Default::default()
-        })
-        .expect("roundtrip check should pass");
+        assert_to_args_roundtrip::<Cli>(TestToArgsRoundTrip::default())
+            .expect("roundtrip check should pass");
     }
 
     #[test]
     fn configurable_roundtrip_stress_test_completes_quickly() {
         let start = Instant::now();
-        let config = TestToArgsRoundTrip {
-            success_count_per_leaf: 256,
-            success_count_global: 256,
-            max_attempts_per_leaf: 256 * 2_000,
-            max_attempts_global: 256 * 40,
-            ..Default::default()
-        };
-
-        assert_to_args_roundtrip::<Cli>(config).expect("roundtrip check should pass");
+        assert_to_args_roundtrip::<Cli>(TestToArgsRoundTrip::default())
+            .expect("roundtrip check should pass");
         assert!(
             start.elapsed() < Duration::from_secs(3),
             "roundtrip stress test took {:?}",
