@@ -37,22 +37,69 @@ impl core::fmt::Display for ArbitraryCheckError {
 
 impl std::error::Error for ArbitraryCheckError {}
 
+/// Configuration for `to_args()` consistency checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TestToArgsConsistencyConfig {
+    /// Number of successful arbitrary samples required.
+    pub success_count: usize,
+    /// Maximum number of attempts before failing the test.
+    pub max_attempts: usize,
+    /// Size of the random byte buffer used to seed arbitrary generation.
+    pub random_data_len: usize,
+}
+
+impl Default for TestToArgsConsistencyConfig {
+    fn default() -> Self {
+        Self {
+            success_count: 500,
+            max_attempts: 10_000,
+            random_data_len: 1024,
+        }
+    }
+}
+
+/// Configuration for `to_args()` roundtrip checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TestToArgsRoundTrip {
+    /// Number of successful arbitrary samples required per command leaf.
+    pub success_count_per_leaf: usize,
+    /// Number of successful arbitrary samples required for CLIs without subcommands.
+    pub success_count_global: usize,
+    /// Maximum number of attempts allowed per command leaf.
+    pub max_attempts_per_leaf: usize,
+    /// Maximum number of attempts allowed for CLIs without subcommands.
+    pub max_attempts_global: usize,
+    /// Size of the random byte buffer used to seed arbitrary generation.
+    pub random_data_len: usize,
+}
+
+impl Default for TestToArgsRoundTrip {
+    fn default() -> Self {
+        Self {
+            success_count_per_leaf: 500,
+            success_count_global: 500,
+            max_attempts_per_leaf: 15_000_000,
+            max_attempts_global: 20_000,
+            random_data_len: 1024,
+        }
+    }
+}
+
 /// Assert that `to_args()` is deterministic for arbitrary-generated values.
 ///
 /// This validates that repeated calls for the same value produce identical
 /// argument vectors.
-pub fn assert_to_args_consistency<T>(samples: usize) -> Result<(), ArbitraryCheckError>
+pub fn assert_to_args_consistency<T>(config: TestToArgsConsistencyConfig) -> Result<(), ArbitraryCheckError>
 where
     T: Facet<'static> + for<'a> Arbitrary<'a> + core::fmt::Debug,
 {
-    let mut data = vec![0u8; 1024];
+    let mut data = vec![0u8; config.random_data_len];
     let mut os_rng = OsRng;
 
     let mut successful_samples = 0usize;
     let mut attempts = 0usize;
-    let max_attempts = samples.saturating_mul(20).max(samples);
 
-    while successful_samples < samples && attempts < max_attempts {
+    while successful_samples < config.success_count && attempts < config.max_attempts {
         attempts += 1;
 
         os_rng
@@ -93,7 +140,7 @@ where
         successful_samples += 1;
     }
 
-    if successful_samples < samples {
+    if successful_samples < config.success_count {
         return Err(ArbitraryCheckError {
             successful_samples,
             attempts,
@@ -110,7 +157,7 @@ where
 /// 1. value -> `to_args()`
 /// 2. args -> parse with `Driver` (strict CLI mode)
 /// 3. parsed value equals original value
-pub fn assert_to_args_roundtrip<T>(samples: usize) -> Result<(), ArbitraryCheckError>
+pub fn assert_to_args_roundtrip<T>(config: TestToArgsRoundTrip) -> Result<(), ArbitraryCheckError>
 where
     T: Facet<'static> + for<'a> Arbitrary<'a> + PartialEq + core::fmt::Debug,
 {
@@ -124,21 +171,22 @@ where
     let command_paths = collect_command_paths(&command_tree);
 
     if command_paths.is_empty() {
-        return assert_to_args_roundtrip_global::<T>(samples);
+        return assert_to_args_roundtrip_global::<T>(config);
     }
 
-    let mut data = vec![0u8; 1024];
+    let mut data = vec![0u8; config.random_data_len];
     let mut os_rng = OsRng;
 
     let mut total_successful_samples = 0usize;
     let mut total_attempts = 0usize;
-    let max_attempts_per_path = samples.saturating_mul(30_000).max(30_000);
 
     for path in command_paths {
         let mut matched_samples = 0usize;
         let mut attempts_for_path = 0usize;
 
-        while matched_samples < samples && attempts_for_path < max_attempts_per_path {
+        while matched_samples < config.success_count_per_leaf
+            && attempts_for_path < config.max_attempts_per_leaf
+        {
             attempts_for_path += 1;
             total_attempts += 1;
 
@@ -188,7 +236,7 @@ where
             total_successful_samples += 1;
         }
 
-        if matched_samples < samples {
+        if matched_samples < config.success_count_per_leaf {
             return Err(ArbitraryCheckError {
                 successful_samples: total_successful_samples,
                 attempts: total_attempts,
@@ -202,18 +250,18 @@ where
     Ok(())
 }
 
-fn assert_to_args_roundtrip_global<T>(samples: usize) -> Result<(), ArbitraryCheckError>
+fn assert_to_args_roundtrip_global<T>(config: TestToArgsRoundTrip) -> Result<(), ArbitraryCheckError>
 where
     T: Facet<'static> + for<'a> Arbitrary<'a> + PartialEq + core::fmt::Debug,
 {
-    let mut data = vec![0u8; 1024];
+    let mut data = vec![0u8; config.random_data_len];
     let mut os_rng = OsRng;
 
     let mut successful_samples = 0usize;
     let mut attempts = 0usize;
-    let max_attempts = samples.saturating_mul(40).max(samples);
 
-    while successful_samples < samples && attempts < max_attempts {
+    while successful_samples < config.success_count_global && attempts < config.max_attempts_global
+    {
         attempts += 1;
 
         os_rng
@@ -256,7 +304,7 @@ where
         successful_samples += 1;
     }
 
-    if successful_samples < samples {
+    if successful_samples < config.success_count_global {
         return Err(ArbitraryCheckError {
             successful_samples,
             attempts,
@@ -414,6 +462,8 @@ where
 mod tests {
     use super::*;
     use crate as args;
+    use std::time::Duration;
+    use std::time::Instant;
     use facet::Facet;
 
     #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
@@ -462,12 +512,43 @@ mod tests {
 
     #[test]
     fn arbitrary_consistency_smoke_test() {
-        assert_to_args_consistency::<Cli>(16).expect("consistency check should pass");
+        assert_to_args_consistency::<Cli>(TestToArgsConsistencyConfig {
+            success_count: 16,
+            max_attempts: 16 * 20,
+            ..Default::default()
+        })
+        .expect("consistency check should pass");
     }
 
     #[test]
     fn arbitrary_roundtrip_smoke_test() {
-        assert_to_args_roundtrip::<Cli>(16).expect("roundtrip check should pass");
+        assert_to_args_roundtrip::<Cli>(TestToArgsRoundTrip {
+            success_count_per_leaf: 16,
+            success_count_global: 16,
+            max_attempts_per_leaf: 16 * 30_000,
+            max_attempts_global: 16 * 40,
+            ..Default::default()
+        })
+        .expect("roundtrip check should pass");
+    }
+
+    #[test]
+    fn configurable_roundtrip_stress_test_completes_quickly() {
+        let start = Instant::now();
+        let config = TestToArgsRoundTrip {
+            success_count_per_leaf: 256,
+            success_count_global: 256,
+            max_attempts_per_leaf: 256 * 2_000,
+            max_attempts_global: 256 * 40,
+            ..Default::default()
+        };
+
+        assert_to_args_roundtrip::<Cli>(config).expect("roundtrip check should pass");
+        assert!(
+            start.elapsed() < Duration::from_secs(3),
+            "roundtrip stress test took {:?}",
+            start.elapsed()
+        );
     }
 
     #[test]
