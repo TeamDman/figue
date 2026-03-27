@@ -1,3 +1,15 @@
+ATTENTION: `teamy-figue` is a fork of `figue`; unless you specifically need the TeamDman fork behavior below, you probably want the upstream crate instead.
+
+I am publishing this fork so I can publish `teamy-mft`, which depends on fork-specific behavior that is not available in upstream `figue`.
+
+Notable differences in this fork include:
+
+- schema-driven `to_args` support and roundtrip helpers
+- arbitrary-based test helpers and default arbitrary test configs
+- fixes for transparent CLI args and `to_args` roundtrips
+- richer help UX, including `help` pseudo-commands, recursive help listing, and implementation/source-file hints in help output
+- Windows-oriented fixes around program-name normalization and snapshot behavior
+
 # figue
 
 [![crates.io](https://img.shields.io/crates/v/figue.svg)](https://crates.io/crates/figue)

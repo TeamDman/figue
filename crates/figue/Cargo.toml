@@ -1,5 +1,5 @@
 [package]
-name = "figue"
+name = "teamy-figue"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,7 +10,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "Type-safe CLI arguments, config files, and environment variables powered by Facet reflection"
-documentation = "https://docs.rs/figue"
+documentation = "https://docs.rs/teamy-figue"
 
 [package.metadata]
 
