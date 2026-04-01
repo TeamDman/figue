@@ -376,7 +376,10 @@ fn test_help_implementation_url_included_when_enabled() {
         .cli(|cli| cli.args(["--help"]))
         .help(|h| {
             h.include_implementation_url(|path| {
-                format!("https://example.com/repo/blob/main/{}", path.replace('\\', "/"))
+                format!(
+                    "https://example.com/repo/blob/main/{}",
+                    path.replace('\\', "/")
+                )
             })
         })
         .build();
