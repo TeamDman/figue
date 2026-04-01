@@ -10,8 +10,7 @@ use crate::{
     },
 };
 use facet::{
-    Def, EnumType, Facet, Field, ScalarType as FacetScalarType, Shape, Type, UserType,
-    Variant,
+    Def, EnumType, Facet, Field, ScalarType as FacetScalarType, Shape, Type, UserType, Variant,
 };
 use heck::ToKebabCase;
 use indexmap::IndexMap;

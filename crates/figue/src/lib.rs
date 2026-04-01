@@ -202,11 +202,8 @@ use facet_core::Facet;
 pub use crate::completions::{Shell, generate_completions_for_shape};
 #[cfg(feature = "arbitrary")]
 pub use arbitrary_checks::{
-    ArbitraryCheckError,
-    TestToArgsConsistencyConfig,
-    TestToArgsRoundTrip,
-    assert_to_args_consistency,
-    assert_to_args_roundtrip,
+    ArbitraryCheckError, TestToArgsConsistencyConfig, TestToArgsRoundTrip,
+    assert_to_args_consistency, assert_to_args_roundtrip,
 };
 pub use builder::builder;
 pub use config_format::{ConfigFormat, ConfigFormatError, JsonFormat};

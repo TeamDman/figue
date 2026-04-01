@@ -194,13 +194,7 @@ fn encode_level(
         let Some(value) = values.get(name) else {
             continue;
         };
-        encode_positional_arg(
-            name,
-            schema,
-            value,
-            args,
-            &mut emitted_positional_separator,
-        )?;
+        encode_positional_arg(name, schema, value, args, &mut emitted_positional_separator)?;
     }
 
     if let Some(field_name) = level.subcommand_field_name()
@@ -286,7 +280,9 @@ fn encode_named_arg(
             }
 
             args.push(flag.clone().into());
-            args.push(value_to_cli_token(name, item, Some(schema.value().inner_if_option()))?.into());
+            args.push(
+                value_to_cli_token(name, item, Some(schema.value().inner_if_option()))?.into(),
+            );
         }
 
         return Ok(());
@@ -496,9 +492,7 @@ mod tests {
             return;
         }
 
-        let cli = UnsignedCli {
-            limit: usize::MAX,
-        };
+        let cli = UnsignedCli { limit: usize::MAX };
 
         let args = to_os_args(&cli).expect("to_args should succeed for large usize values");
         let args_as_str = args

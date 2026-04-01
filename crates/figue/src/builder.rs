@@ -534,9 +534,7 @@ impl HelpConfigBuilder {
         let revision = revision.into();
         self.include_implementation_url(move |source_file| {
             let normalized = source_file.replace('\\', "/");
-            format!(
-                "https://github.com/{owner_repo}/blob/{revision}/{normalized}"
-            )
+            format!("https://github.com/{owner_repo}/blob/{revision}/{normalized}")
         })
     }
 

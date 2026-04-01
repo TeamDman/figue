@@ -110,9 +110,9 @@ fn test_clean_command_hint_includes_full_invocation() {
 #[cfg(feature = "arbitrary")]
 #[test]
 fn test_consumer_helper_assert_to_args_consistency() {
-    if let Err(e) = figue::assert_to_args_consistency::<Cli>(
-        figue::TestToArgsConsistencyConfig::default(),
-    ) {
+    if let Err(e) =
+        figue::assert_to_args_consistency::<Cli>(figue::TestToArgsConsistencyConfig::default())
+    {
         panic!("CLI argument consistency check failed: {e}")
     }
 }
