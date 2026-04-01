@@ -9,8 +9,10 @@ use heck::ToKebabCase;
 use rand::TryRngCore;
 use rand::rngs::OsRng;
 
+use crate::config_value_parser::from_config_value;
+use crate::layers::cli::{CliConfigBuilder, parse_cli};
 use crate::schema::{ArgKind, ArgLevelSchema, Schema};
-use crate::{Driver, ToArgs, builder};
+use crate::ToArgs;
 
 /// Error returned by arbitrary-based CLI roundtrip checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,7 +91,9 @@ impl Default for TestToArgsRoundTrip {
 ///
 /// This validates that repeated calls for the same value produce identical
 /// argument vectors.
-pub fn assert_to_args_consistency<T>(config: TestToArgsConsistencyConfig) -> Result<(), ArbitraryCheckError>
+pub fn assert_to_args_consistency<T>(
+    config: TestToArgsConsistencyConfig,
+) -> Result<(), ArbitraryCheckError>
 where
     T: Facet<'static> + for<'a> Arbitrary<'a> + core::fmt::Debug,
 {
@@ -177,83 +181,109 @@ where
     let mut data = vec![0u8; config.random_data_len];
     let mut os_rng = OsRng;
 
+    let mut matched_samples_by_path = command_paths
+        .into_iter()
+        .map(|path| (path, 0usize))
+        .collect::<BTreeMap<_, _>>();
+    let mut remaining_paths = matched_samples_by_path.len();
+    let max_attempts_total = remaining_paths.saturating_mul(config.max_attempts_per_leaf);
+
     let mut total_successful_samples = 0usize;
     let mut total_attempts = 0usize;
 
-    for path in command_paths {
-        let mut matched_samples = 0usize;
-        let mut attempts_for_path = 0usize;
+    while remaining_paths > 0 && total_attempts < max_attempts_total {
+        total_attempts += 1;
 
-        while matched_samples < config.success_count_per_leaf
-            && attempts_for_path < config.max_attempts_per_leaf
-        {
-            attempts_for_path += 1;
-            total_attempts += 1;
-
-            os_rng
-                .try_fill_bytes(&mut data)
-                .map_err(|error| ArbitraryCheckError {
-                    successful_samples: total_successful_samples,
-                    attempts: total_attempts,
-                    message: format!("failed to gather random bytes: {error}"),
-                })?;
-
-            let mut rng = arbitrary::Unstructured::new(&data);
-            let Ok(instance) = T::arbitrary(&mut rng) else {
-                continue;
-            };
-
-            let args = instance.to_args().map_err(|error| ArbitraryCheckError {
+        os_rng
+            .try_fill_bytes(&mut data)
+            .map_err(|error| ArbitraryCheckError {
                 successful_samples: total_successful_samples,
                 attempts: total_attempts,
-                message: format!("to_args() failed: {error}"),
+                message: format!("failed to gather random bytes: {error}"),
             })?;
 
-            let extracted_path = extract_subcommand_path_from_args(&args, &command_tree);
-            if extracted_path != path {
-                continue;
-            }
+        let mut rng = arbitrary::Unstructured::new(&data);
+        let Ok(instance) = T::arbitrary(&mut rng) else {
+            continue;
+        };
 
-            let parsed = parse_from_os_args::<T>(&args).map_err(|message| ArbitraryCheckError {
-                successful_samples: total_successful_samples,
-                attempts: total_attempts,
-                message: format!(
-                    "failed to parse generated args for path {path:?}\nargs={args:?}\nvalue={instance:?}\nerror={message}"
-                ),
-            })?;
+        let args = instance.to_args().map_err(|error| ArbitraryCheckError {
+            successful_samples: total_successful_samples,
+            attempts: total_attempts,
+            message: format!("to_args() failed: {error}"),
+        })?;
 
-            if instance != parsed {
-                return Err(ArbitraryCheckError {
-                    successful_samples: total_successful_samples,
-                    attempts: total_attempts,
-                    message: format!(
-                        "roundtrip mismatch for path {path:?}\noriginal={instance:?}\nparsed={parsed:?}\nargs={args:?}"
-                    ),
-                });
-            }
+        let extracted_path = extract_subcommand_path_from_args(&args, &command_tree);
+        let Some(matched_samples) = matched_samples_by_path.get_mut(&extracted_path) else {
+            continue;
+        };
 
-            matched_samples += 1;
-            total_successful_samples += 1;
+        if *matched_samples >= config.success_count_per_leaf {
+            continue;
         }
 
-        if matched_samples < config.success_count_per_leaf {
+        let parsed = parse_from_os_args_with_schema::<T>(&schema, &args).map_err(|message| {
+            ArbitraryCheckError {
+            successful_samples: total_successful_samples,
+            attempts: total_attempts,
+            message: format!(
+                "failed to parse generated args for path {extracted_path:?}\nargs={args:?}\nvalue={instance:?}\nerror={message}"
+            ),
+        }
+        })?;
+
+        if instance != parsed {
             return Err(ArbitraryCheckError {
                 successful_samples: total_successful_samples,
                 attempts: total_attempts,
                 message: format!(
-                    "insufficient coverage for command path {path:?}: matched {matched_samples} samples after {attempts_for_path} attempts"
+                    "roundtrip mismatch for path {extracted_path:?}\noriginal={instance:?}\nparsed={parsed:?}\nargs={args:?}"
                 ),
             });
         }
+
+        *matched_samples += 1;
+        total_successful_samples += 1;
+
+        if *matched_samples == config.success_count_per_leaf {
+            remaining_paths -= 1;
+        }
+    }
+
+    if remaining_paths > 0 {
+        let missing_paths = matched_samples_by_path
+            .iter()
+            .filter(|(_, matched_samples)| **matched_samples < config.success_count_per_leaf)
+            .map(|(path, matched_samples)| {
+                format!(
+                    "{path:?}: matched {matched_samples} samples after {total_attempts} total attempts"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        return Err(ArbitraryCheckError {
+            successful_samples: total_successful_samples,
+            attempts: total_attempts,
+            message: format!("insufficient coverage for command paths: {missing_paths}"),
+        });
     }
 
     Ok(())
 }
 
-fn assert_to_args_roundtrip_global<T>(config: TestToArgsRoundTrip) -> Result<(), ArbitraryCheckError>
+fn assert_to_args_roundtrip_global<T>(
+    config: TestToArgsRoundTrip,
+) -> Result<(), ArbitraryCheckError>
 where
     T: Facet<'static> + for<'a> Arbitrary<'a> + PartialEq + core::fmt::Debug,
 {
+    let schema = Schema::from_shape(T::SHAPE).map_err(|error| ArbitraryCheckError {
+        successful_samples: 0,
+        attempts: 0,
+        message: format!("failed to build schema: {error}"),
+    })?;
+
     let mut data = vec![0u8; config.random_data_len];
     let mut os_rng = OsRng;
 
@@ -283,12 +313,14 @@ where
             message: format!("to_args() failed: {error}"),
         })?;
 
-        let parsed = parse_from_os_args::<T>(&args).map_err(|message| ArbitraryCheckError {
+        let parsed = parse_from_os_args_with_schema::<T>(&schema, &args).map_err(|message| {
+            ArbitraryCheckError {
             successful_samples,
             attempts,
             message: format!(
                 "failed to parse generated args\nargs={args:?}\nvalue={instance:?}\nerror={message}"
             ),
+        }
         })?;
 
         if instance != parsed {
@@ -379,16 +411,12 @@ fn collect_command_paths(root: &CommandNode) -> Vec<Vec<String>> {
 }
 
 fn extract_subcommand_path_from_args(args: &[OsString], root: &CommandNode) -> Vec<String> {
-    let tokens = args
-        .iter()
-        .map(|arg| arg.to_string_lossy().to_string())
-        .collect::<Vec<_>>();
-
-    fn walk(node: &CommandNode, tokens: &[String], index: &mut usize, output: &mut Vec<String>) {
+    fn walk(node: &CommandNode, tokens: &[OsString], index: &mut usize, output: &mut Vec<String>) {
         let mut positionals_seen = 0usize;
 
         while *index < tokens.len() {
-            let token = &tokens[*index];
+            let token = tokens[*index].to_string_lossy();
+            let token = token.as_ref();
 
             if token.starts_with("--") {
                 let flag_name = token.trim_start_matches("--");
@@ -400,7 +428,9 @@ fn extract_subcommand_path_from_args(args: &[OsString], root: &CommandNode) -> V
                     }
                 } else {
                     *index += 1;
-                    if *index < tokens.len() && !tokens[*index].starts_with('-') {
+                    if *index < tokens.len()
+                        && !tokens[*index].to_string_lossy().starts_with('-')
+                    {
                         *index += 1;
                     }
                 }
@@ -421,7 +451,7 @@ fn extract_subcommand_path_from_args(args: &[OsString], root: &CommandNode) -> V
             if let Some(branch) = node
                 .subcommands
                 .iter()
-                .find(|branch| branch.cli_name == normalize_command_token(token))
+                .find(|branch| command_token_matches_cli_name(token, &branch.cli_name))
             {
                 output.push(branch.effective_name.clone());
                 *index += 1;
@@ -434,37 +464,60 @@ fn extract_subcommand_path_from_args(args: &[OsString], root: &CommandNode) -> V
 
     let mut index = 0usize;
     let mut output = Vec::new();
-    walk(root, &tokens, &mut index, &mut output);
+    walk(root, args, &mut index, &mut output);
     output
 }
 
-fn normalize_command_token(token: &str) -> String {
-    token.replace('_', "-").to_ascii_lowercase()
+fn command_token_matches_cli_name(token: &str, cli_name: &str) -> bool {
+    let mut cli_name_chars = cli_name.chars();
+
+    for token_char in token.chars() {
+        let normalized = if token_char == '_' {
+            '-'
+        } else {
+            token_char.to_ascii_lowercase()
+        };
+
+        if Some(normalized) != cli_name_chars.next() {
+            return false;
+        }
+    }
+
+    cli_name_chars.next().is_none()
 }
 
-fn parse_from_os_args<T>(args: &[OsString]) -> Result<T, String>
+fn parse_from_os_args_with_schema<T>(schema: &Schema, args: &[OsString]) -> Result<T, String>
 where
     T: Facet<'static>,
 {
-    let config = builder::<T>()
-        .map_err(|error| format!("builder failed: {error}"))?
-        .cli(|cli| cli.args_os(args).strict())
-        .build();
+    let cli_config = CliConfigBuilder::new().args_os(args).strict().build();
+    let layer_output = parse_cli(schema, &cli_config);
 
-    Driver::new(config)
-        .run()
-        .into_result()
-        .map(|output| output.get_silent())
-        .map_err(|error| format!("driver failed: {error:?}"))
+    if !layer_output.diagnostics.is_empty() {
+        let diagnostics = layer_output
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(format!("cli parse failed: {diagnostics}"));
+    }
+
+    let Some(value) = layer_output.value else {
+        return Err("cli parse returned no value".to_string());
+    };
+
+    from_config_value(&value).map_err(|error| format!("config value parse failed: {error}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate as args;
+    use crate::FigueBuiltins;
+    use facet::Facet;
     use std::time::Duration;
     use std::time::Instant;
-    use facet::Facet;
 
     #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
     #[repr(u8)]
@@ -510,6 +563,326 @@ mod tests {
         command: Command,
     }
 
+    #[derive(Facet, arbitrary::Arbitrary, Debug, Default, PartialEq)]
+    #[facet(rename_all = "kebab-case")]
+    struct VendoredGlobalArgs {
+        #[facet(args::named, default)]
+        debug: bool,
+
+        #[facet(args::named)]
+        log_filter: Option<String>,
+
+        #[facet(args::named)]
+        log_file: Option<String>,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug)]
+    struct VendoredDiscordArchiveCli {
+        #[facet(flatten)]
+        global_args: VendoredGlobalArgs,
+
+        #[facet(flatten)]
+        #[arbitrary(default)]
+        builtins: FigueBuiltins,
+
+        #[facet(args::subcommand)]
+        command: VendoredCommand,
+    }
+
+    impl PartialEq for VendoredDiscordArchiveCli {
+        fn eq(&self, other: &Self) -> bool {
+            self.global_args == other.global_args && self.command == other.command
+        }
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[repr(u8)]
+    enum VendoredCommand {
+        BotToken(VendoredBotTokenArgs),
+        Cache(VendoredCacheArgs),
+        Home(VendoredHomeArgs),
+        Invite(VendoredInviteArgs),
+        Live(VendoredLiveArgs),
+        OutputDir(VendoredOutputDirArgs),
+        Sync(VendoredSyncArgs),
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredBotTokenArgs {
+        #[facet(args::subcommand)]
+        command: VendoredBotTokenCommand,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[repr(u8)]
+    enum VendoredBotTokenCommand {
+        Clear(VendoredBotTokenClearArgs),
+        Set(VendoredBotTokenSetArgs),
+        ShowSource(VendoredBotTokenShowSourceArgs),
+        Validate(VendoredBotTokenValidateArgs),
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredBotTokenClearArgs;
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredBotTokenSetArgs {
+        #[facet(args::positional)]
+        token: Option<String>,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredBotTokenShowSourceArgs {
+        #[facet(args::named)]
+        token: Option<String>,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredBotTokenValidateArgs {
+        #[facet(args::named)]
+        token: Option<String>,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredCacheArgs {
+        #[facet(args::subcommand)]
+        command: VendoredCacheCommand,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[repr(u8)]
+    enum VendoredCacheCommand {
+        Clean(VendoredCacheCleanArgs),
+        Open(VendoredCacheOpenArgs),
+        Show(VendoredCacheShowArgs),
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredCacheCleanArgs;
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredCacheOpenArgs;
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredCacheShowArgs;
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredHomeArgs {
+        #[facet(args::subcommand)]
+        command: VendoredHomeCommand,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[repr(u8)]
+    enum VendoredHomeCommand {
+        Open(VendoredHomeOpenArgs),
+        Show(VendoredHomeShowArgs),
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredHomeOpenArgs;
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredHomeShowArgs;
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[facet(rename_all = "kebab-case")]
+    struct VendoredInviteArgs {
+        #[facet(args::named)]
+        token: Option<String>,
+
+        #[facet(args::named, default)]
+        no_open: bool,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[facet(rename_all = "kebab-case")]
+    struct VendoredLiveArgs {
+        #[facet(args::named)]
+        token: Option<String>,
+
+        #[facet(args::subcommand)]
+        command: VendoredLiveCommand,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[repr(u8)]
+    enum VendoredLiveCommand {
+        Attachment(VendoredLiveAttachmentArgs),
+        Channel(VendoredLiveChannelArgs),
+        Guild(VendoredLiveGuildArgs),
+        Message(VendoredLiveMessageArgs),
+        Thread(VendoredLiveThreadArgs),
+        User(VendoredLiveUserArgs),
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredLiveAttachmentArgs {
+        #[facet(args::subcommand)]
+        command: VendoredLiveAttachmentCommand,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[repr(u8)]
+    enum VendoredLiveAttachmentCommand {
+        List(VendoredLiveAttachmentListArgs),
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[facet(rename_all = "kebab-case")]
+    struct VendoredLiveAttachmentListArgs {
+        #[facet(args::named)]
+        channel_id: Option<u64>,
+
+        #[facet(args::named)]
+        thread_id: Option<u64>,
+
+        #[facet(args::named)]
+        before: Option<String>,
+
+        #[facet(args::named)]
+        limit: Option<u8>,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredLiveChannelArgs {
+        #[facet(args::subcommand)]
+        command: VendoredLiveChannelCommand,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[repr(u8)]
+    enum VendoredLiveChannelCommand {
+        List(VendoredLiveChannelListArgs),
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[facet(rename_all = "kebab-case")]
+    struct VendoredLiveChannelListArgs {
+        #[facet(args::named)]
+        guild_id: u64,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredLiveGuildArgs {
+        #[facet(args::subcommand)]
+        command: VendoredLiveGuildCommand,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[repr(u8)]
+    enum VendoredLiveGuildCommand {
+        List(VendoredLiveGuildListArgs),
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredLiveGuildListArgs;
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredLiveMessageArgs {
+        #[facet(args::subcommand)]
+        command: VendoredLiveMessageCommand,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[repr(u8)]
+    enum VendoredLiveMessageCommand {
+        List(VendoredLiveMessageListArgs),
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[facet(rename_all = "kebab-case")]
+    struct VendoredLiveMessageListArgs {
+        #[facet(args::named)]
+        channel_id: Option<u64>,
+
+        #[facet(args::named)]
+        thread_id: Option<u64>,
+
+        #[facet(args::named)]
+        before: Option<String>,
+
+        #[facet(args::named)]
+        limit: Option<u8>,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredLiveThreadArgs {
+        #[facet(args::subcommand)]
+        command: VendoredLiveThreadCommand,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[repr(u8)]
+    enum VendoredLiveThreadCommand {
+        List(VendoredLiveThreadListArgs),
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[facet(rename_all = "kebab-case")]
+    struct VendoredLiveThreadListArgs {
+        #[facet(args::named)]
+        guild_id: u64,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredLiveUserArgs {
+        #[facet(args::subcommand)]
+        command: VendoredLiveUserCommand,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[repr(u8)]
+    enum VendoredLiveUserCommand {
+        List(VendoredLiveUserListArgs),
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[facet(rename_all = "kebab-case")]
+    struct VendoredLiveUserListArgs {
+        #[facet(args::named)]
+        guild_id: u64,
+
+        #[facet(args::named)]
+        after_user_id: Option<u64>,
+
+        #[facet(args::named)]
+        limit: Option<u64>,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredOutputDirArgs {
+        #[facet(args::subcommand)]
+        command: VendoredOutputDirCommand,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[repr(u8)]
+    enum VendoredOutputDirCommand {
+        Open(VendoredOutputDirOpenArgs),
+        Set(VendoredOutputDirSetArgs),
+        Show(VendoredOutputDirShowArgs),
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredOutputDirOpenArgs;
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredOutputDirSetArgs {
+        #[facet(args::positional)]
+        path: String,
+    }
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    struct VendoredOutputDirShowArgs;
+
+    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[facet(rename_all = "kebab-case")]
+    struct VendoredSyncArgs {
+        #[facet(args::named)]
+        output_dir: Option<String>,
+    }
+
     #[test]
     fn arbitrary_consistency_smoke_test() {
         assert_to_args_consistency::<Cli>(TestToArgsConsistencyConfig::default())
@@ -547,6 +920,28 @@ mod tests {
         assert!(
             paths.contains(&vec!["Output".to_string(), "Get".to_string()]),
             "expected Output -> Get path"
+        );
+    }
+
+    #[test]
+    fn vendored_discord_archive_leaf_count_matches_fixture() {
+        let schema = Schema::from_shape(VendoredDiscordArchiveCli::SHAPE)
+            .expect("vendored schema should be valid");
+        let tree = command_node_from_arg_level(schema.args());
+        let paths = collect_command_paths(&tree);
+
+        assert_eq!(paths.len(), 20, "vendored fixture should expose 20 leaves");
+    }
+
+    #[test]
+    fn vendored_discord_archive_roundtrip_stress_test_completes_quickly() {
+        let start = Instant::now();
+        assert_to_args_roundtrip::<VendoredDiscordArchiveCli>(TestToArgsRoundTrip::default())
+            .expect("vendored discord archive roundtrip should pass");
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "vendored discord archive roundtrip took {:?}",
+            start.elapsed()
         );
     }
 }
