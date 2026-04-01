@@ -549,7 +549,7 @@ checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
 name = "figue-attrs"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "facet",
 ]
@@ -1496,7 +1496,7 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "teamy-figue"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "arbitrary",
  "ariadne",
