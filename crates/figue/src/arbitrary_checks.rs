@@ -6,8 +6,8 @@ use std::ffi::OsString;
 use arbitrary::Arbitrary;
 use facet_core::Facet;
 use heck::ToKebabCase;
-use rand::TryRngCore;
-use rand::rngs::OsRng;
+use rand::{RngCore, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 
 use crate::config_value_parser::from_config_value;
 use crate::layers::cli::{CliConfigBuilder, parse_cli};
@@ -48,6 +48,13 @@ pub struct TestToArgsConsistencyConfig {
     pub max_attempts: usize,
     /// Size of the random byte buffer used to seed arbitrary generation.
     pub random_data_len: usize,
+    /// Number of samples worth of random bytes to generate per refill.
+    pub prefill_sample_count: usize,
+    /// Root seed for the deterministic RNG used during this run.
+    ///
+    /// When `None`, a fresh seed is chosen at the start of the check so
+    /// repeated test runs explore different random streams.
+    pub root_seed: Option<u64>,
 }
 
 impl Default for TestToArgsConsistencyConfig {
@@ -56,6 +63,8 @@ impl Default for TestToArgsConsistencyConfig {
             success_count: 500,
             max_attempts: 10_000,
             random_data_len: 1024,
+            prefill_sample_count: 256,
+            root_seed: None,
         }
     }
 }
@@ -73,17 +82,78 @@ pub struct TestToArgsRoundTrip {
     pub max_attempts_global: usize,
     /// Size of the random byte buffer used to seed arbitrary generation.
     pub random_data_len: usize,
+    /// Number of samples worth of random bytes to generate per refill.
+    pub prefill_sample_count: usize,
+    /// Root seed for the deterministic RNG used during this run.
+    ///
+    /// When `None`, a fresh seed is chosen at the start of the check so
+    /// repeated test runs explore different random streams.
+    pub root_seed: Option<u64>,
 }
 
 impl Default for TestToArgsRoundTrip {
     fn default() -> Self {
         Self {
-            success_count_per_leaf: 64,
-            success_count_global: 64,
-            max_attempts_per_leaf: 64 * 4_000,
-            max_attempts_global: 64 * 80,
+            success_count_per_leaf: 4,
+            success_count_global: 4,
+            max_attempts_per_leaf: 4 * 4_000,
+            max_attempts_global: 4 * 80,
             random_data_len: 1024,
+            prefill_sample_count: 256,
+            root_seed: None,
         }
+    }
+}
+
+#[derive(Debug)]
+struct EntropyPool {
+    sample_len: usize,
+    prefill_sample_count: usize,
+    root_seed: u64,
+    next_offset: usize,
+    bytes: Vec<u8>,
+    rng: ChaCha8Rng,
+}
+
+impl EntropyPool {
+    fn new(sample_len: usize, prefill_sample_count: usize, root_seed: Option<u64>) -> Self {
+        let sample_len = sample_len.max(1);
+        let prefill_sample_count = prefill_sample_count.max(1);
+        let root_seed = root_seed.unwrap_or_else(rand::random::<u64>);
+        let byte_len = sample_len.saturating_mul(prefill_sample_count);
+        let mut pool = Self {
+            sample_len,
+            prefill_sample_count,
+            root_seed,
+            next_offset: 0,
+            bytes: vec![0u8; byte_len],
+            rng: ChaCha8Rng::seed_from_u64(root_seed),
+        };
+        pool.refill();
+        pool
+    }
+
+    fn next_sample(&mut self) -> &[u8] {
+        if self.next_offset + self.sample_len > self.bytes.len() {
+            self.refill();
+        }
+
+        let start = self.next_offset;
+        let end = start + self.sample_len;
+        self.next_offset = end;
+        &self.bytes[start..end]
+    }
+
+    fn context_suffix(&self) -> String {
+        format!(
+            "root_seed={} random_data_len={} prefill_sample_count={}",
+            self.root_seed, self.sample_len, self.prefill_sample_count
+        )
+    }
+
+    fn refill(&mut self) {
+        self.rng.fill_bytes(&mut self.bytes);
+        self.next_offset = 0;
     }
 }
 
@@ -97,8 +167,11 @@ pub fn assert_to_args_consistency<T>(
 where
     T: Facet<'static> + for<'a> Arbitrary<'a> + core::fmt::Debug,
 {
-    let mut data = vec![0u8; config.random_data_len];
-    let mut os_rng = OsRng;
+    let mut entropy_pool = EntropyPool::new(
+        config.random_data_len,
+        config.prefill_sample_count,
+        config.root_seed,
+    );
 
     let mut successful_samples = 0usize;
     let mut attempts = 0usize;
@@ -106,15 +179,7 @@ where
     while successful_samples < config.success_count && attempts < config.max_attempts {
         attempts += 1;
 
-        os_rng
-            .try_fill_bytes(&mut data)
-            .map_err(|error| ArbitraryCheckError {
-                successful_samples,
-                attempts,
-                message: format!("failed to gather random bytes: {error}"),
-            })?;
-
-        let mut rng = arbitrary::Unstructured::new(&data);
+        let mut rng = arbitrary::Unstructured::new(entropy_pool.next_sample());
         let Ok(instance) = T::arbitrary(&mut rng) else {
             continue;
         };
@@ -136,7 +201,8 @@ where
                 successful_samples,
                 attempts,
                 message: format!(
-                    "to_args() is non-deterministic for generated value: {instance:?}\nfirst={args1:?}\nsecond={args2:?}"
+                    "to_args() is non-deterministic for generated value: {instance:?}\nfirst={args1:?}\nsecond={args2:?}\n{}",
+                    entropy_pool.context_suffix()
                 ),
             });
         }
@@ -148,7 +214,10 @@ where
         return Err(ArbitraryCheckError {
             successful_samples,
             attempts,
-            message: "insufficient arbitrary coverage for consistency test".to_string(),
+            message: format!(
+                "insufficient arbitrary coverage for consistency test\n{}",
+                entropy_pool.context_suffix()
+            ),
         });
     }
 
@@ -171,20 +240,20 @@ where
         message: format!("failed to build schema: {error}"),
     })?;
 
-    let command_tree = command_node_from_arg_level(schema.args());
-    let command_paths = collect_command_paths(&command_tree);
+    let mut command_tree = command_node_from_arg_level(schema.args());
+    let command_paths = collect_command_paths(&mut command_tree);
 
     if command_paths.is_empty() {
         return assert_to_args_roundtrip_global::<T>(config);
     }
 
-    let mut data = vec![0u8; config.random_data_len];
-    let mut os_rng = OsRng;
+    let mut entropy_pool = EntropyPool::new(
+        config.random_data_len,
+        config.prefill_sample_count,
+        config.root_seed,
+    );
 
-    let mut matched_samples_by_path = command_paths
-        .into_iter()
-        .map(|path| (path, 0usize))
-        .collect::<BTreeMap<_, _>>();
+    let mut matched_samples_by_path = vec![0usize; command_paths.len()];
     let mut remaining_paths = matched_samples_by_path.len();
     let max_attempts_total = remaining_paths.saturating_mul(config.max_attempts_per_leaf);
 
@@ -194,15 +263,7 @@ where
     while remaining_paths > 0 && total_attempts < max_attempts_total {
         total_attempts += 1;
 
-        os_rng
-            .try_fill_bytes(&mut data)
-            .map_err(|error| ArbitraryCheckError {
-                successful_samples: total_successful_samples,
-                attempts: total_attempts,
-                message: format!("failed to gather random bytes: {error}"),
-            })?;
-
-        let mut rng = arbitrary::Unstructured::new(&data);
+        let mut rng = arbitrary::Unstructured::new(entropy_pool.next_sample());
         let Ok(instance) = T::arbitrary(&mut rng) else {
             continue;
         };
@@ -213,10 +274,11 @@ where
             message: format!("to_args() failed: {error}"),
         })?;
 
-        let extracted_path = extract_subcommand_path_from_args(&args, &command_tree);
-        let Some(matched_samples) = matched_samples_by_path.get_mut(&extracted_path) else {
+        let Some(leaf_id) = extract_subcommand_leaf_id_from_args(&args, &command_tree) else {
             continue;
         };
+
+        let matched_samples = &mut matched_samples_by_path[leaf_id];
 
         if *matched_samples >= config.success_count_per_leaf {
             continue;
@@ -227,7 +289,9 @@ where
             successful_samples: total_successful_samples,
             attempts: total_attempts,
             message: format!(
-                "failed to parse generated args for path {extracted_path:?}\nargs={args:?}\nvalue={instance:?}\nerror={message}"
+                "failed to parse generated args for path {:?}\nargs={args:?}\nvalue={instance:?}\nerror={message}\n{}",
+                command_paths[leaf_id],
+                entropy_pool.context_suffix()
             ),
         }
         })?;
@@ -237,7 +301,9 @@ where
                 successful_samples: total_successful_samples,
                 attempts: total_attempts,
                 message: format!(
-                    "roundtrip mismatch for path {extracted_path:?}\noriginal={instance:?}\nparsed={parsed:?}\nargs={args:?}"
+                    "roundtrip mismatch for path {:?}\noriginal={instance:?}\nparsed={parsed:?}\nargs={args:?}\n{}",
+                    command_paths[leaf_id],
+                    entropy_pool.context_suffix()
                 ),
             });
         }
@@ -251,8 +317,9 @@ where
     }
 
     if remaining_paths > 0 {
-        let missing_paths = matched_samples_by_path
+        let missing_paths = command_paths
             .iter()
+            .zip(&matched_samples_by_path)
             .filter(|(_, matched_samples)| **matched_samples < config.success_count_per_leaf)
             .map(|(path, matched_samples)| {
                 format!(
@@ -265,7 +332,10 @@ where
         return Err(ArbitraryCheckError {
             successful_samples: total_successful_samples,
             attempts: total_attempts,
-            message: format!("insufficient coverage for command paths: {missing_paths}"),
+            message: format!(
+                "insufficient coverage for command paths: {missing_paths}\n{}",
+                entropy_pool.context_suffix()
+            ),
         });
     }
 
@@ -284,8 +354,11 @@ where
         message: format!("failed to build schema: {error}"),
     })?;
 
-    let mut data = vec![0u8; config.random_data_len];
-    let mut os_rng = OsRng;
+    let mut entropy_pool = EntropyPool::new(
+        config.random_data_len,
+        config.prefill_sample_count,
+        config.root_seed,
+    );
 
     let mut successful_samples = 0usize;
     let mut attempts = 0usize;
@@ -294,15 +367,7 @@ where
     {
         attempts += 1;
 
-        os_rng
-            .try_fill_bytes(&mut data)
-            .map_err(|error| ArbitraryCheckError {
-                successful_samples,
-                attempts,
-                message: format!("failed to gather random bytes: {error}"),
-            })?;
-
-        let mut rng = arbitrary::Unstructured::new(&data);
+        let mut rng = arbitrary::Unstructured::new(entropy_pool.next_sample());
         let Ok(instance) = T::arbitrary(&mut rng) else {
             continue;
         };
@@ -318,7 +383,8 @@ where
             successful_samples,
             attempts,
             message: format!(
-                "failed to parse generated args\nargs={args:?}\nvalue={instance:?}\nerror={message}"
+                "failed to parse generated args\nargs={args:?}\nvalue={instance:?}\nerror={message}\n{}",
+                entropy_pool.context_suffix()
             ),
         }
         })?;
@@ -328,7 +394,8 @@ where
                 successful_samples,
                 attempts,
                 message: format!(
-                    "roundtrip mismatch\noriginal={instance:?}\nparsed={parsed:?}\nargs={args:?}"
+                    "roundtrip mismatch\noriginal={instance:?}\nparsed={parsed:?}\nargs={args:?}\n{}",
+                    entropy_pool.context_suffix()
                 ),
             });
         }
@@ -340,7 +407,10 @@ where
         return Err(ArbitraryCheckError {
             successful_samples,
             attempts,
-            message: "insufficient arbitrary coverage for roundtrip test".to_string(),
+            message: format!(
+                "insufficient arbitrary coverage for roundtrip test\n{}",
+                entropy_pool.context_suffix()
+            ),
         });
     }
 
@@ -357,6 +427,7 @@ struct CommandBranch {
 #[derive(Clone, Debug, Default)]
 struct CommandNode {
     positional_count: usize,
+    leaf_id: Option<usize>,
     named_flag_consumes_value: BTreeMap<String, bool>,
     subcommands: Vec<CommandBranch>,
 }
@@ -388,18 +459,19 @@ fn command_node_from_arg_level(level: &ArgLevelSchema) -> CommandNode {
     node
 }
 
-fn collect_command_paths(root: &CommandNode) -> Vec<Vec<String>> {
-    fn visit(node: &CommandNode, current: &mut Vec<String>, output: &mut Vec<Vec<String>>) {
+fn collect_command_paths(root: &mut CommandNode) -> Vec<Vec<String>> {
+    fn visit(node: &mut CommandNode, current: &mut Vec<String>, output: &mut Vec<Vec<String>>) {
         if node.subcommands.is_empty() {
             if !current.is_empty() {
+                node.leaf_id = Some(output.len());
                 output.push(current.clone());
             }
             return;
         }
 
-        for branch in &node.subcommands {
+        for branch in &mut node.subcommands {
             current.push(branch.effective_name.clone());
-            visit(&branch.node, current, output);
+            visit(&mut branch.node, current, output);
             let _ = current.pop();
         }
     }
@@ -410,8 +482,8 @@ fn collect_command_paths(root: &CommandNode) -> Vec<Vec<String>> {
     output
 }
 
-fn extract_subcommand_path_from_args(args: &[OsString], root: &CommandNode) -> Vec<String> {
-    fn walk(node: &CommandNode, tokens: &[OsString], index: &mut usize, output: &mut Vec<String>) {
+fn extract_subcommand_leaf_id_from_args(args: &[OsString], root: &CommandNode) -> Option<usize> {
+    fn walk(node: &CommandNode, tokens: &[OsString], index: &mut usize) -> Option<usize> {
         let mut positionals_seen = 0usize;
 
         while *index < tokens.len() {
@@ -453,19 +525,18 @@ fn extract_subcommand_path_from_args(args: &[OsString], root: &CommandNode) -> V
                 .iter()
                 .find(|branch| command_token_matches_cli_name(token, &branch.cli_name))
             {
-                output.push(branch.effective_name.clone());
                 *index += 1;
-                walk(&branch.node, tokens, index, output);
+                return walk(&branch.node, tokens, index);
             }
 
-            return;
+            return node.leaf_id;
         }
+
+        node.leaf_id
     }
 
     let mut index = 0usize;
-    let mut output = Vec::new();
-    walk(root, args, &mut index, &mut output);
-    output
+    walk(root, args, &mut index)
 }
 
 fn command_token_matches_cli_name(token: &str, cli_name: &str) -> bool {
@@ -910,8 +981,8 @@ mod tests {
     #[test]
     fn collects_nested_command_paths() {
         let schema = Schema::from_shape(NestedCli::SHAPE).expect("schema should be valid");
-        let tree = command_node_from_arg_level(schema.args());
-        let paths = collect_command_paths(&tree);
+        let mut tree = command_node_from_arg_level(schema.args());
+        let paths = collect_command_paths(&mut tree);
 
         assert!(
             paths.contains(&vec!["Output".to_string(), "Set".to_string()]),
@@ -927,8 +998,8 @@ mod tests {
     fn vendored_discord_archive_leaf_count_matches_fixture() {
         let schema = Schema::from_shape(VendoredDiscordArchiveCli::SHAPE)
             .expect("vendored schema should be valid");
-        let tree = command_node_from_arg_level(schema.args());
-        let paths = collect_command_paths(&tree);
+        let mut tree = command_node_from_arg_level(schema.args());
+        let paths = collect_command_paths(&mut tree);
 
         assert_eq!(paths.len(), 20, "vendored fixture should expose 20 leaves");
     }

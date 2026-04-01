@@ -38,6 +38,7 @@ strsim.workspace = true
 supports-color.workspace = true
 arbitrary = { workspace = true, optional = true, features = ["derive"] }
 rand = { workspace = true, optional = true }
+rand_chacha = { workspace = true, optional = true }
 
 [dev-dependencies]
 facet-format = { workspace = true, features = ["tracing"] }
@@ -54,4 +55,4 @@ default = ["rich-diagnostics"]
 rich-diagnostics = []
 doc = ["facet/doc"]
 tracing = ["facet-reflect/tracing", "facet-json/tracing", "facet-format/tracing"]
-arbitrary = ["dep:arbitrary", "dep:rand"]
+arbitrary = ["dep:arbitrary", "dep:rand", "dep:rand_chacha"]
