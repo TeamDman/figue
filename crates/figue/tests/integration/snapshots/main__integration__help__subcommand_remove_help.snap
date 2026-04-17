@@ -1,6 +1,7 @@
 ---
 source: crates/figue/tests/integration/help.rs
-expression: "$crate :: common :: strip_ansi(& help)"
+assertion_line: 342
+expression: "strip_ansi_escapes :: strip_str(& help)"
 ---
 main rm
 
@@ -14,5 +15,11 @@ ARGUMENTS:
             Package name to remove
 
 OPTIONS:
+    -h, --help
+            Show help message and exit.
+    -V, --version
+            Show version and exit.
+        --completions <bash,zsh,fish>
+            Generate shell completions.
     -y, --yes
             Don't ask for confirmation

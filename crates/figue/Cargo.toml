@@ -1,6 +1,6 @@
 [package]
 name = "teamy-figue"
-version.workspace = true
+version = "2.0.2"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -16,6 +16,9 @@ documentation = "https://docs.rs/teamy-figue"
 
 [package.metadata."docs.rs"]
 rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+[lib]
+name = "figue"
 
 [dependencies]
 camino.workspace = true
