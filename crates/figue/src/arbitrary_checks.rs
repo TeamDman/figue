@@ -9,10 +9,10 @@ use heck::ToKebabCase;
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
+use crate::ToArgs;
 use crate::config_value_parser::from_config_value;
 use crate::layers::cli::{CliConfigBuilder, parse_cli};
 use crate::schema::{ArgKind, ArgLevelSchema, Schema};
-use crate::ToArgs;
 
 /// Error returned by arbitrary-based CLI roundtrip checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -500,9 +500,7 @@ fn extract_subcommand_leaf_id_from_args(args: &[OsString], root: &CommandNode) -
                     }
                 } else {
                     *index += 1;
-                    if *index < tokens.len()
-                        && !tokens[*index].to_string_lossy().starts_with('-')
-                    {
+                    if *index < tokens.len() && !tokens[*index].to_string_lossy().starts_with('-') {
                         *index += 1;
                     }
                 }
