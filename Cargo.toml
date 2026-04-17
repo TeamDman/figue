@@ -14,7 +14,7 @@ keywords = ["cli", "args", "parser", "facet", "command-line"]
 categories = ["command-line-interface"]
 
 [workspace.dependencies]
-figue-attrs = { path = "crates/figue-attrs", version = "2.0.0" }
+figue-attrs = { path = "crates/figue-attrs", version = "=2.0.1" }
 
 # Facet ecosystem
 facet = { version = "0.44.0", features = ["indexmap", "camino", "net"] }
