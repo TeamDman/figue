@@ -1,5 +1,6 @@
 ---
 source: crates/figue/tests/integration/help.rs
+assertion_line: 504
 expression: "strip_ansi_escapes :: strip_str(& help)"
 ---
 main ls
@@ -10,7 +11,13 @@ USAGE:
     main ls [OPTIONS]
 
 OPTIONS:
-    -a, --[no-]all
+    -h, --help
+            Show help message and exit.
+    -V, --version
+            Show version and exit.
+        --completions <bash,zsh,fish>
+            Generate shell completions.
+    -a, --all
             Show all versions
-        --[no-]json
+        --json
             Output as JSON

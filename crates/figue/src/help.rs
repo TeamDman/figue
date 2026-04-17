@@ -393,8 +393,11 @@ pub(crate) fn generate_help_for_subcommand_with_config_formats(
     // Navigate to the subcommand
     let mut current_args = schema.args();
     let mut command_path = vec![program_name.clone()];
+    let mut inherited_flags = Vec::<ArgSchema>::new();
 
     for name in subcommand_path {
+        merge_named_flags(&mut inherited_flags, current_args);
+
         // The path contains effective names (e.g., "Clone", "rm") from ConfigValue.
         // Look up by effective_name since that's what's stored in the path.
         let sub = current_args
@@ -416,6 +419,8 @@ pub(crate) fn generate_help_for_subcommand_with_config_formats(
         }
     }
 
+    remove_shadowed_named_flags(&mut inherited_flags, current_args);
+
     // Find the final subcommand to get its docs
     let mut final_sub: Option<&Subcommand> = None;
     let mut args = schema.args();
@@ -431,7 +436,13 @@ pub(crate) fn generate_help_for_subcommand_with_config_formats(
         }
     }
 
-    generate_help_for_subcommand_level(current_args, final_sub, &command_path.join(" "), config)
+    generate_help_for_subcommand_level(
+        current_args,
+        final_sub,
+        &command_path.join(" "),
+        &inherited_flags,
+        config,
+    )
 }
 
 /// Generate help-list output for subcommands at the current command level.
@@ -629,6 +640,7 @@ fn generate_help_from_schema(
         program_name,
         config,
         config_file_extensions,
+        &[],
     );
 
     out
@@ -639,6 +651,7 @@ fn generate_help_for_subcommand_level(
     args: &ArgLevelSchema,
     subcommand: Option<&Subcommand>,
     full_command: &str,
+    inherited_flags: &[ArgSchema],
     config: &HelpConfig,
 ) -> String {
     let mut out = String::new();
@@ -677,6 +690,7 @@ fn generate_help_for_subcommand_level(
         full_command,
         config,
         DEFAULT_CONFIG_FILE_EXTENSIONS,
+        inherited_flags,
     );
 
     out
@@ -2386,16 +2400,17 @@ fn generate_arg_level_help(
     program_name: &str,
     config: &HelpConfig,
     config_file_extensions: &[&str],
+    inherited_flags: &[ArgSchema],
 ) {
     // Separate positionals and named flags
     let mut positionals: Vec<&ArgSchema> = Vec::new();
-    let mut flags: Vec<&ArgSchema> = Vec::new();
+    let mut flags = inherited_flags.to_vec();
 
     for (_name, arg) in args.args().iter() {
         if arg.kind().is_positional() {
             positionals.push(arg);
         } else {
-            flags.push(arg);
+            flags.push(arg.clone());
         }
     }
 
@@ -2643,6 +2658,40 @@ fn collect_config_value_overrides(
 
 fn config_override_flag(config_flag: &str, path: &[String]) -> String {
     format!("{config_flag}.{}", path.join("."))
+}
+
+fn merge_named_flags(flags: &mut Vec<ArgSchema>, args: &ArgLevelSchema) {
+    for (_name, arg) in args.args().iter() {
+        if arg.kind().is_positional() {
+            continue;
+        }
+
+        flags.retain(|existing| !arg_schemas_conflict(existing, arg));
+        flags.push(arg.clone());
+    }
+}
+
+fn remove_shadowed_named_flags(flags: &mut Vec<ArgSchema>, args: &ArgLevelSchema) {
+    let local_flags = args
+        .args()
+        .iter()
+        .map(|(_name, arg)| arg)
+        .filter(|arg| !arg.kind().is_positional())
+        .collect::<Vec<_>>();
+
+    flags.retain(|existing| {
+        !local_flags
+            .iter()
+            .any(|local| arg_schemas_conflict(existing, local))
+    });
+}
+
+fn arg_schemas_conflict(left: &ArgSchema, right: &ArgSchema) -> bool {
+    left.name() == right.name()
+        || matches!(
+            (left.kind().short(), right.kind().short()),
+            (Some(left_short), Some(right_short)) if left_short == right_short
+        )
 }
 
 /// Write help for a single argument.
@@ -3332,5 +3381,96 @@ mod tests {
         assert!(output.contains("myapp cache show"));
         assert!(!output.contains("myapp home\n\n"));
         assert!(!output.contains("myapp cache\n\n"));
+    }
+
+    #[derive(Facet)]
+    struct InheritedHelpRootArgs {
+        /// Enable debug output
+        #[facet(args::named, crate::short = 'd')]
+        debug: bool,
+
+        #[facet(args::subcommand)]
+        command: InheritedHelpRootCommand,
+    }
+
+    #[derive(Facet)]
+    #[repr(u8)]
+    #[allow(dead_code)]
+    enum InheritedHelpRootCommand {
+        Repo(InheritedHelpRepoArgs),
+    }
+
+    #[derive(Facet)]
+    struct InheritedHelpRepoArgs {
+        /// Enable quiet mode
+        #[facet(args::named, crate::short = 'q')]
+        quiet: bool,
+
+        #[facet(args::subcommand)]
+        command: InheritedHelpRepoCommand,
+    }
+
+    #[derive(Facet)]
+    #[repr(u8)]
+    #[allow(dead_code)]
+    enum InheritedHelpRepoCommand {
+        Clone {
+            /// Repository URL
+            #[facet(args::positional)]
+            url: String,
+        },
+    }
+
+    #[test]
+    fn test_nested_subcommand_help_includes_inherited_parent_flags() {
+        let schema = Schema::from_shape(InheritedHelpRootArgs::SHAPE).unwrap();
+        let help = generate_help_for_subcommand(
+            &schema,
+            &["Repo".to_string(), "Clone".to_string()],
+            &HelpConfig {
+                program_name: Some("myapp".to_string()),
+                ..HelpConfig::default()
+            },
+        );
+
+        assert!(help.contains("myapp repo clone [OPTIONS] <URL>"));
+        assert!(help.contains("--debug"));
+        assert!(help.contains("--quiet"));
+        assert!(help.contains("<URL>"));
+    }
+
+    #[derive(Facet)]
+    struct ShadowedHelpRootArgs {
+        /// Root verbose flag
+        #[facet(args::named, crate::short = 'v')]
+        verbose: bool,
+
+        #[facet(args::subcommand)]
+        command: ShadowedHelpCommand,
+    }
+
+    #[derive(Facet)]
+    #[repr(u8)]
+    #[allow(dead_code)]
+    enum ShadowedHelpCommand {
+        Run(ShadowedHelpRunArgs),
+    }
+
+    #[derive(Facet)]
+    struct ShadowedHelpRunArgs {
+        /// Local verbose flag
+        #[facet(args::named, crate::short = 'v')]
+        verbose: bool,
+    }
+
+    #[test]
+    fn test_subcommand_help_omits_shadowed_parent_flags() {
+        let schema = Schema::from_shape(ShadowedHelpRootArgs::SHAPE).unwrap();
+        let help =
+            generate_help_for_subcommand(&schema, &["Run".to_string()], &HelpConfig::default());
+
+        assert!(help.contains("Local verbose flag"));
+        assert!(!help.contains("Root verbose flag"));
+        assert_eq!(help.matches("--verbose").count(), 1);
     }
 }
