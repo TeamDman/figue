@@ -19,8 +19,8 @@ figue-attrs = { path = "crates/figue-attrs", version = "2.0.5" }
 # Facet ecosystem
 facet = { version = "0.46", features = ["indexmap", "camino", "net"] }
 facet-core = { version = "0.46" }
-facet-format = { version = "0.47" }
-facet-json = { version = "0.46" }
+facet-format = { version = "0.47.1" }
+facet-json = { version = "0.46.1" }
 facet-reflect = { version = "0.46" }
 facet-pretty = { version = "0.46" }
 facet-error = { version = "0.46" }
