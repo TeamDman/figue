@@ -461,19 +461,13 @@ mod tests {
     #[test]
     fn test_figue_builtins_in_help() {
         let help = generate_help::<ArgsWithBuiltins>(&HelpConfig::default());
-        assert!(
-            help.contains("--[no-]help"),
-            "help should contain --[no-]help"
-        );
+        assert!(help.contains("--help"), "help should contain --help");
         assert!(help.contains("-h"), "help should contain -h");
         assert!(
-            help.contains("--[no-]html-help"),
-            "help should contain --[no-]html-help"
+            help.contains("--html-help"),
+            "help should contain --html-help"
         );
-        assert!(
-            help.contains("--[no-]version"),
-            "help should contain --[no-]version"
-        );
+        assert!(help.contains("--version"), "help should contain --version");
         assert!(help.contains("-V"), "help should contain -V");
         assert!(
             help.contains("--completions"),

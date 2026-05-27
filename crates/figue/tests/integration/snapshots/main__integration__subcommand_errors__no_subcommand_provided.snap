@@ -1,5 +1,6 @@
 ---
 source: crates/figue/tests/integration/subcommand_errors.rs
+assertion_line: 373
 expression: "strip_ansi_escapes :: strip_str(& err.to_string())"
 ---
 main
@@ -8,11 +9,11 @@ USAGE:
     main [OPTIONS] <COMMAND>
 
 OPTIONS:
-    -h, --[no-]help
+    -h, --help
             Show help message and exit.
-        --[no-]html-help
+        --html-help
             Open HTML help in the browser and exit.
-    -V, --[no-]version
+    -V, --version
             Show version and exit.
         --completions <bash,zsh,fish>
             Generate shell completions.

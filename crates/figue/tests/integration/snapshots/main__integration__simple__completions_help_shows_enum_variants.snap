@@ -1,5 +1,6 @@
 ---
 source: crates/figue/tests/integration/simple.rs
+assertion_line: 396
 expression: "strip_ansi_escapes :: strip_str(& help.to_string())"
 ---
 main
@@ -9,11 +10,11 @@ USAGE:
 
 OPTIONS:
         --name <STRING>
-    -h, --[no-]help
+    -h, --help
             Show help message and exit.
-        --[no-]html-help
+        --html-help
             Open HTML help in the browser and exit.
-    -V, --[no-]version
+    -V, --version
             Show version and exit.
         --completions <bash,zsh,fish>
             Generate shell completions.

@@ -513,13 +513,19 @@ fn test_help_list_root_shows_subcommand_helps() {
         "full list should include install help"
     );
     assert!(
-        help.contains("--global"),
+        help.contains("--[no-]global"),
         "full list should include install flags"
     );
     assert!(help.contains("rm"), "full list should include rm help");
-    assert!(help.contains("--yes"), "full list should include rm flags");
+    assert!(
+        help.contains("--[no-]yes"),
+        "full list should include rm flags"
+    );
     assert!(help.contains("ls"), "full list should include ls help");
-    assert!(help.contains("--json"), "full list should include ls flags");
+    assert!(
+        help.contains("--[no-]json"),
+        "full list should include ls flags"
+    );
 }
 
 // Nested subcommands: help should be aware of the full path

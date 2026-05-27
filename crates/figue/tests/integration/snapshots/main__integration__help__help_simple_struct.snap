@@ -1,5 +1,6 @@
 ---
 source: crates/figue/tests/integration/help.rs
+assertion_line: 41
 expression: "strip_ansi_escapes :: strip_str(& help)"
 ---
 myapp 1.0.0
@@ -22,11 +23,11 @@ OPTIONS:
             Enable verbose output
     -j, --jobs <COUNT>
             Number of parallel jobs
-    -h, --[no-]help
+    -h, --help
             Show help message and exit.
-        --[no-]html-help
+        --html-help
             Open HTML help in the browser and exit.
-    -V, --[no-]version
+    -V, --version
             Show version and exit.
         --completions <bash,zsh,fish>
             Generate shell completions.

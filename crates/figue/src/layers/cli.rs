@@ -1380,13 +1380,13 @@ impl<'a> ParseContext<'a> {
         is_multiple: bool,
         duplicate_span: Option<facet_reflect::Span>,
     ) {
-        let mut duplicate_non_multiple = false;
         let result_map = match target {
             InsertTarget::Current => &mut self.result,
             InsertTarget::Parent(idx) => &mut self.parent_stack[idx].result,
         };
 
-        duplicate_non_multiple = Self::insert_value_at_path(result_map, path, value, is_multiple);
+        let duplicate_non_multiple =
+            Self::insert_value_at_path(result_map, path, value, is_multiple);
 
         if duplicate_non_multiple {
             let name = path.last().map(String::as_str).unwrap_or("");
@@ -1434,6 +1434,8 @@ impl<'a> ParseContext<'a> {
                 }
             }
         }
+
+        let mut duplicate_non_multiple = false;
 
         match result_map.entry(head.clone()) {
             indexmap::map::Entry::Vacant(entry) => {

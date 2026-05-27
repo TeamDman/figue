@@ -2722,7 +2722,11 @@ fn write_arg_help(out: &mut String, arg: &ArgSchema, config: &HelpConfig) {
         ));
     } else {
         let is_bool = arg.value().inner_if_option().is_bool();
-        let flag_str = if is_bool {
+        let bool_default_is_false =
+            arg.default().map(config_value_summary).as_deref() == Some("false");
+        let flag_str = if is_bool && bool_default_is_false {
+            format!("--{}", name.to_kebab_case())
+        } else if is_bool {
             format!("--[no-]{}", name.to_kebab_case())
         } else {
             format!("--{}", name.to_kebab_case())
@@ -3434,8 +3438,8 @@ mod tests {
         );
 
         assert!(help.contains("myapp repo clone [OPTIONS] <URL>"));
-        assert!(help.contains("--debug"));
-        assert!(help.contains("--quiet"));
+        assert!(help.contains("--[no-]debug"));
+        assert!(help.contains("--[no-]quiet"));
         assert!(help.contains("<URL>"));
     }
 
@@ -3471,6 +3475,6 @@ mod tests {
 
         assert!(help.contains("Local verbose flag"));
         assert!(!help.contains("Root verbose flag"));
-        assert_eq!(help.matches("--verbose").count(), 1);
+        assert_eq!(help.matches("--[no-]verbose").count(), 1);
     }
 }

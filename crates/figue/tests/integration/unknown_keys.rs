@@ -89,8 +89,8 @@ fn test_help_works_with_unknown_env_keys_strict() {
 
     let help = err.help_text().expect("should have help text");
     assert!(
-        help.contains("--[no-]help"),
-        "help text should contain --[no-]help"
+        help.contains("--help"),
+        "help text should contain --help"
     );
 }
 

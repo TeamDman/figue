@@ -1879,8 +1879,8 @@ mod tests {
                     "help should contain program name"
                 );
                 assert!(
-                    text.contains("--[no-]help"),
-                    "help should mention --[no-]help flag"
+                    text.contains("--help"),
+                    "help should mention --help flag"
                 );
             }
             other => panic!("expected DriverError::Help, got {:?}", other),
@@ -2310,7 +2310,7 @@ mod tests {
         let result = Driver::new(config).run().into_result();
 
         match result {
-            Err(DriverError::Help { text }) => {
+            Err(DriverError::Help { text, .. }) => {
                 assert!(
                     text.contains("test-app"),
                     "help should contain configured program name"
