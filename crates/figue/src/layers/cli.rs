@@ -185,6 +185,8 @@ struct ParentFlagLookup {
     is_bool: bool,
     /// Whether this is a counted flag
     is_counted: bool,
+    /// Whether this flag accepts multiple values
+    is_multiple: bool,
 }
 
 /// Parsed metadata for a dotted config override flag.
@@ -413,6 +415,7 @@ impl<'a> ParseContext<'a> {
                 target,
                 &lookup.insertion_path,
                 lookup.is_bool,
+                lookup.is_multiple,
                 None, // enum_variants not available for parent lookup
                 inline_value,
             );
@@ -430,6 +433,7 @@ impl<'a> ParseContext<'a> {
                         span: None,
                         provenance: Some(prov),
                     }),
+                    arg_schema.multiple(),
                 );
                 self.index += 1;
             } else if let Some(lookup) = self.find_long_flag_in_parents(negated_name)
@@ -446,6 +450,7 @@ impl<'a> ParseContext<'a> {
                         span: None,
                         provenance: Some(prov),
                     }),
+                    lookup.is_multiple,
                 );
                 self.index += 1;
             } else {
@@ -610,7 +615,7 @@ impl<'a> ParseContext<'a> {
             });
 
             // Determine target and flag info
-            let (target, name, insertion_path, is_bool, is_counted) =
+            let (target, name, insertion_path, is_bool, is_counted, is_multiple) =
                 if let Some((name, arg_schema)) = found {
                     let is_counted =
                         matches!(arg_schema.kind(), ArgKind::Named { counted: true, .. });
@@ -624,6 +629,7 @@ impl<'a> ParseContext<'a> {
                         arg_schema.insertion_path().to_vec(),
                         is_bool,
                         is_counted,
+                        arg_schema.multiple(),
                     )
                 } else if let Some(lookup) = self.find_short_flag_in_parents(*ch) {
                     // Adoption agency: flag found in parent level
@@ -633,6 +639,7 @@ impl<'a> ParseContext<'a> {
                         lookup.insertion_path,
                         lookup.is_bool,
                         lookup.is_counted,
+                        lookup.is_multiple,
                     )
                 } else {
                     self.emit_error(format!("unknown flag: -{}", ch));
@@ -657,6 +664,7 @@ impl<'a> ParseContext<'a> {
                         span: None,
                         provenance: Some(prov),
                     }),
+                    is_multiple,
                 );
             } else if is_last {
                 // Non-bool flag at end: look for value
@@ -667,7 +675,7 @@ impl<'a> ParseContext<'a> {
                     let value_str = self.args[self.index];
                     let prov_arg = format!("-{}", ch);
                     let value = self.parse_value_string(value_str, &prov_arg, value_span);
-                    self.insert_value_path_to(target, &insertion_path, value);
+                    self.insert_value_path_to(target, &insertion_path, value, is_multiple);
                 } else {
                     // For short flags, we don't have easy access to enum variants
                     // Could be improved in the future
@@ -680,7 +688,7 @@ impl<'a> ParseContext<'a> {
                 let value_span = self.span_within_current(i + 1, rest.len());
                 let prov_arg = format!("-{}", ch);
                 let value = self.parse_value_string(&rest, &prov_arg, value_span);
-                self.insert_value_path_to(target, &insertion_path, value);
+                self.insert_value_path_to(target, &insertion_path, value, is_multiple);
                 break; // Consumed rest of chars
             }
         }
@@ -703,7 +711,7 @@ impl<'a> ParseContext<'a> {
         });
 
         // Determine target and flag info
-        let (target, name, insertion_path, is_bool, is_counted) =
+        let (target, name, insertion_path, is_bool, is_counted, is_multiple) =
             if let Some((name, arg_schema)) = found {
                 let is_counted = matches!(arg_schema.kind(), ArgKind::Named { counted: true, .. });
                 let is_bool = arg_schema.value().inner_if_option().is_bool();
@@ -713,6 +721,7 @@ impl<'a> ParseContext<'a> {
                     arg_schema.insertion_path().to_vec(),
                     is_bool,
                     is_counted,
+                    arg_schema.multiple(),
                 )
             } else if let Some(lookup) = self.find_short_flag_in_parents(ch) {
                 // Adoption agency: flag found in parent level
@@ -722,6 +731,7 @@ impl<'a> ParseContext<'a> {
                     lookup.insertion_path,
                     lookup.is_bool,
                     lookup.is_counted,
+                    lookup.is_multiple,
                 )
             } else {
                 self.emit_error(format!("unknown flag: -{}", ch));
@@ -750,23 +760,26 @@ impl<'a> ParseContext<'a> {
                     span: None,
                     provenance: Some(prov),
                 }),
+                is_multiple,
             );
         } else {
             // Value starts after the '=' which is at position 2 (after -k)
             let value_span = self.span_within_current(3, value_str.len());
             let value = self.parse_value_string(value_str, &prov_arg, value_span);
-            self.insert_value_path_to(target, &insertion_path, value);
+            self.insert_value_path_to(target, &insertion_path, value, is_multiple);
         }
     }
 
     fn parse_flag_value(&mut self, arg: &str, schema: &ArgSchema, inline_value: Option<&str>) {
         let is_bool = schema.value().inner_if_option().is_bool();
+        let is_multiple = schema.multiple();
         let enum_variants = schema.value().inner_if_option().enum_variants();
         self.parse_flag_value_simple(
             arg,
             InsertTarget::Current,
             schema.insertion_path(),
             is_bool,
+            is_multiple,
             enum_variants,
             inline_value,
         );
@@ -779,6 +792,7 @@ impl<'a> ParseContext<'a> {
         target: InsertTarget,
         insertion_path: &[String],
         is_bool: bool,
+        is_multiple: bool,
         enum_variants: Option<&[String]>,
         inline_value: Option<&str>,
     ) {
@@ -799,6 +813,7 @@ impl<'a> ParseContext<'a> {
                     span: None,
                     provenance: Some(prov),
                 }),
+                is_multiple,
             );
             self.index += 1;
         } else {
@@ -839,6 +854,7 @@ impl<'a> ParseContext<'a> {
                             span: None,
                             provenance: Some(prov),
                         }),
+                        is_multiple,
                     );
                     return;
                 }
@@ -862,7 +878,7 @@ impl<'a> ParseContext<'a> {
 
             let prov_arg = arg.split('=').next().unwrap_or(arg);
             let value = self.parse_value_string(value_str, prov_arg, value_span);
-            self.insert_value_path_to(target, insertion_path, value);
+            self.insert_value_path_to(target, insertion_path, value, is_multiple);
         }
     }
 
@@ -1142,12 +1158,14 @@ impl<'a> ParseContext<'a> {
             if let Some((effective_name, arg_schema)) = parent.args.args().get(flag_name) {
                 let is_counted = matches!(arg_schema.kind(), ArgKind::Named { counted: true, .. });
                 let is_bool = arg_schema.value().inner_if_option().is_bool();
+                let is_multiple = arg_schema.multiple();
                 return Some(ParentFlagLookup {
                     parent_idx: idx,
                     effective_name: effective_name.to_string(),
                     insertion_path: arg_schema.insertion_path().to_vec(),
                     is_bool,
                     is_counted,
+                    is_multiple,
                 });
             }
         }
@@ -1165,12 +1183,14 @@ impl<'a> ParseContext<'a> {
                 {
                     let is_counted = matches!(schema.kind(), ArgKind::Named { counted: true, .. });
                     let is_bool = schema.value().inner_if_option().is_bool();
+                    let is_multiple = schema.multiple();
                     return Some(ParentFlagLookup {
                         parent_idx: idx,
                         effective_name: name.to_string(),
                         insertion_path: schema.insertion_path().to_vec(),
                         is_bool,
                         is_counted,
+                        is_multiple,
                     });
                 }
             }
@@ -1211,7 +1231,12 @@ impl<'a> ParseContext<'a> {
 
             let value_span = self.current_span();
             let value = self.parse_value_string(arg, arg, value_span);
-            self.insert_value_path_to(InsertTarget::Current, schema.insertion_path(), value);
+            self.insert_value_path_to(
+                InsertTarget::Current,
+                schema.insertion_path(),
+                value,
+                schema.multiple(),
+            );
             self.index += 1;
             return true;
         }
@@ -1237,19 +1262,26 @@ impl<'a> ParseContext<'a> {
     }
 
     /// Insert a value to a specific target and ConfigValue path.
-    fn insert_value_path_to(&mut self, target: InsertTarget, path: &[String], value: ConfigValue) {
+    fn insert_value_path_to(
+        &mut self,
+        target: InsertTarget,
+        path: &[String],
+        value: ConfigValue,
+        is_multiple: bool,
+    ) {
         let result_map = match target {
             InsertTarget::Current => &mut self.result,
             InsertTarget::Parent(idx) => &mut self.parent_stack[idx].result,
         };
 
-        Self::insert_value_at_path(result_map, path, value);
+        Self::insert_value_at_path(result_map, path, value, is_multiple);
     }
 
     fn insert_value_at_path(
         result_map: &mut IndexMap<String, ConfigValue, RandomState>,
         path: &[String],
         value: ConfigValue,
+        is_multiple: bool,
     ) {
         let Some((head, tail)) = path.split_first() else {
             return;
@@ -1261,11 +1293,11 @@ impl<'a> ParseContext<'a> {
                 .or_insert_with(|| ConfigValue::Object(Sourced::new(IndexMap::default())));
             match entry {
                 ConfigValue::Object(sourced) => {
-                    Self::insert_value_at_path(&mut sourced.value, tail, value);
+                    Self::insert_value_at_path(&mut sourced.value, tail, value, is_multiple);
                 }
                 existing => {
                     let mut nested = IndexMap::default();
-                    Self::insert_value_at_path(&mut nested, tail, value);
+                    Self::insert_value_at_path(&mut nested, tail, value, is_multiple);
                     *existing = ConfigValue::Object(Sourced::new(nested));
                 }
             }
@@ -1274,7 +1306,15 @@ impl<'a> ParseContext<'a> {
 
         match result_map.entry(head.clone()) {
             indexmap::map::Entry::Vacant(entry) => {
-                entry.insert(value);
+                if is_multiple {
+                    entry.insert(ConfigValue::Array(Sourced {
+                        value: vec![value],
+                        span: None,
+                        provenance: None,
+                    }));
+                } else {
+                    entry.insert(value);
+                }
             }
             indexmap::map::Entry::Occupied(mut entry) => {
                 // Accumulate into array for repeated flags
