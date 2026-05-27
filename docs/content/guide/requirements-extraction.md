@@ -109,7 +109,7 @@ concrete ways to provide it:
 Missing required fields for this operation:
 
   database_url <String> at config.database_url
-    Set via: --config.database-url or $MYAPP__CONFIG__DATABASE_URL
+    Set via: --config.database-url or $MYAPP__DATABASE_URL
 ```
 
 The CLI hint is the kebab-cased override flag; the env hint uses the config

@@ -84,5 +84,5 @@ runtime reflection cost.
 - [Getting Started](@/guide/getting-started.md) — install figue and parse your first argument
 - [Layered Configuration](@/guide/layered-configuration.md) — combine CLI, env, and files
 - [Attribute Reference](@/reference/attributes.md) — every `#[facet(args::…)]` attribute
-- [GitHub](https://github.com/bearcove/figue) — source and issues
-- [docs.rs/figue](https://docs.rs/figue) — API documentation
+- [GitHub](https://github.com/TeamDman/figue) — source and issues
+- [docs.rs/teamy-figue](https://docs.rs/teamy-figue) — API documentation for the fork package

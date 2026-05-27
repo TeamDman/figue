@@ -12,9 +12,9 @@ Notable differences in this fork include:
 
 # figue
 
-[![crates.io](https://img.shields.io/crates/v/figue.svg)](https://crates.io/crates/figue)
-[![documentation](https://docs.rs/figue/badge.svg)](https://docs.rs/figue)
-[![MIT/Apache-2.0 licensed](https://img.shields.io/crates/l/figue.svg)](LICENSE-MIT)
+[![crates.io](https://img.shields.io/crates/v/teamy-figue.svg)](https://crates.io/crates/teamy-figue)
+[![documentation](https://docs.rs/teamy-figue/badge.svg)](https://docs.rs/teamy-figue)
+[![MIT/Apache-2.0 licensed](https://img.shields.io/crates/l/teamy-figue.svg)](LICENSE-MIT)
 
 figue (pronounced 'fig', like the fruit) provides configuration parsing from
 CLI arguments, environment variables, and config files, a bit like
@@ -49,10 +49,10 @@ The entry point of figue is [`builder`] — let yourself be guided from there.
 
 ## Documentation
 
-- **Guide & reference**: <https://figue.bearcove.eu> — task-oriented guide,
-  copy-paste recipes, and an exhaustive reference (attributes, grammar, merge
-  rules, error catalog).
-- **API docs**: <https://docs.rs/figue>
+- **Upstream guide & reference**: <https://figue.bearcove.eu> — task-oriented
+  guide, copy-paste recipes, and an exhaustive reference (attributes, grammar,
+  merge rules, error catalog).
+- **Fork API docs**: <https://docs.rs/teamy-figue>
 
 The site sources live in `docs/` and are built with
 [dodeca](https://github.com/bearcove/dodeca) (`ddc serve` locally, deployed to

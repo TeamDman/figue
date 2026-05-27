@@ -1,5 +1,4 @@
 # Build and deploy the figue documentation site to GitHub Pages.
-# Published at https://figue.bearcove.eu
 name: Website
 
 on:
@@ -34,11 +33,6 @@ jobs:
 
       - name: Build website with dodeca
         run: ~/.cargo/bin/ddc build
-
-      # Ensure the custom domain is set regardless of how dodeca handles
-      # stable_assets across versions.
-      - name: Write CNAME
-        run: echo "figue.bearcove.eu" > docs/public/CNAME
 
       - name: Setup Pages
         uses: actions/configure-pages@v6

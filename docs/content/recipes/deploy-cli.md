@@ -145,7 +145,7 @@ REGISTRY=registry.internal deploy plan
 deploy deploy
 #   Missing required fields for this operation:
 #     image <String> at config.image
-#       Set via: --config.image or $DEPLOY__CONFIG__IMAGE
+#       Set via: --config.image or $DEPLOY__IMAGE
 
 deploy deploy --config.image app:1.4.2
 deploy deploy --config.image app:1.4.2 \

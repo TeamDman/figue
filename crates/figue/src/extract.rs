@@ -232,7 +232,16 @@ fn compute_cli_hint(origin_path: &str) -> Option<String> {
 
 /// Compute environment variable hint from origin path.
 fn compute_env_hint(origin_path: &str, env_prefix: Option<&str>) -> Option<String> {
-    let shouty_path = origin_path
+    let env_path = if env_prefix.is_some() {
+        origin_path
+            .split_once('.')
+            .map(|(_, rest)| rest)
+            .unwrap_or(origin_path)
+    } else {
+        origin_path
+    };
+
+    let shouty_path = env_path
         .split('.')
         .map(|s| s.to_shouty_snake_case())
         .collect::<Vec<_>>()
@@ -475,7 +484,7 @@ mod tests {
     #[test]
     fn test_env_hint_format_with_prefix() {
         let hint = compute_env_hint("config.database_url", Some("MYAPP"));
-        assert_eq!(hint, Some("$MYAPP__CONFIG__DATABASE_URL".to_string()));
+        assert_eq!(hint, Some("$MYAPP__DATABASE_URL".to_string()));
     }
 
     #[test]
