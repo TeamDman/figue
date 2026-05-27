@@ -14,6 +14,7 @@
 use std::hash::RandomState;
 
 use facet_reflect::Span;
+use heck::ToKebabCase;
 use indexmap::IndexMap;
 
 use crate::config_value::{ConfigValue, ObjectMap, Sourced};
@@ -310,8 +311,7 @@ impl<'a> ValueBuilder<'a> {
             unused_keys: self.unused_keys,
             diagnostics: self.diagnostics,
             source_text: None,
-            config_file_path: None,
-            help_list_mode: None,
+            config_file_paths: IndexMap::default(),
         }
     }
 
@@ -407,8 +407,7 @@ impl<'a> ValueBuilder<'a> {
             unused_keys: self.unused_keys,
             diagnostics: self.diagnostics,
             source_text: None,
-            config_file_path: None,
-            help_list_mode: None,
+            config_file_paths: IndexMap::default(),
         }
     }
 
@@ -447,7 +446,7 @@ impl<'a> ValueBuilder<'a> {
         let (effective_name, field_schema) = struct_schema
             .fields()
             .iter()
-            .find(|(k, _)| k.to_lowercase() == segment.to_lowercase())?;
+            .find(|(k, _)| Self::schema_key_matches_segment(k, segment))?;
 
         result.insertion_path.push(effective_name.clone());
 
@@ -519,7 +518,7 @@ impl<'a> ValueBuilder<'a> {
         let (variant_name, variant_schema) = enum_schema
             .variants()
             .iter()
-            .find(|(k, _)| k.to_lowercase() == variant_segment.to_lowercase())?;
+            .find(|(k, _)| Self::schema_key_matches_segment(k, variant_segment))?;
 
         // Record enum selection for conflict detection
         result.enum_selections.push(EnumSelection {
@@ -554,7 +553,7 @@ impl<'a> ValueBuilder<'a> {
         let (field_name, field_schema) = variant_schema
             .fields()
             .iter()
-            .find(|(k, _)| k.to_lowercase() == field_segment.to_lowercase())?;
+            .find(|(k, _)| Self::schema_key_matches_segment(k, field_segment))?;
 
         result.insertion_path.push(field_name.clone());
 
@@ -564,6 +563,10 @@ impl<'a> ValueBuilder<'a> {
 
         // Continue navigating
         self.resolve_value_path(field_schema.value(), &path[1..], result)
+    }
+
+    fn schema_key_matches_segment(key: &str, segment: &str) -> bool {
+        key.eq_ignore_ascii_case(segment) || key.to_kebab_case().eq_ignore_ascii_case(segment)
     }
 
     /// Check and record enum variant selection. Returns false if there's a conflict.
@@ -751,7 +754,7 @@ mod tests {
     #[test]
     fn test_simple_set() {
         let schema = Schema::from_shape(ArgsWithSimpleConfig::SHAPE).unwrap();
-        let config_schema = schema.config().unwrap();
+        let config_schema = schema.configs().first().unwrap();
         let mut builder = ValueBuilder::new(config_schema);
 
         let success = builder.set(
@@ -770,7 +773,7 @@ mod tests {
     #[test]
     fn test_invalid_path() {
         let schema = Schema::from_shape(ArgsWithSimpleConfig::SHAPE).unwrap();
-        let config_schema = schema.config().unwrap();
+        let config_schema = schema.configs().first().unwrap();
         let mut builder = ValueBuilder::new(config_schema);
 
         let success = builder.set(
@@ -786,7 +789,7 @@ mod tests {
     #[test]
     fn test_enum_variant_path() {
         let schema = Schema::from_shape(ArgsWithEnumConfig::SHAPE).unwrap();
-        let config_schema = schema.config().unwrap();
+        let config_schema = schema.configs().first().unwrap();
         let mut builder = ValueBuilder::new(config_schema);
 
         let prov_bucket = Provenance::env("TEST__STORAGE__S3__BUCKET", "my-bucket");
@@ -815,7 +818,7 @@ mod tests {
     #[test]
     fn test_enum_variant_conflict() {
         let schema = Schema::from_shape(ArgsWithEnumConfig::SHAPE).unwrap();
-        let config_schema = schema.config().unwrap();
+        let config_schema = schema.configs().first().unwrap();
         let mut builder = ValueBuilder::new(config_schema);
 
         // Set S3 variant
@@ -843,7 +846,7 @@ mod tests {
     #[test]
     fn test_has_value_at() {
         let schema = Schema::from_shape(ArgsWithSimpleConfig::SHAPE).unwrap();
-        let config_schema = schema.config().unwrap();
+        let config_schema = schema.configs().first().unwrap();
         let mut builder = ValueBuilder::new(config_schema);
 
         assert!(!builder.has_value_at(&path(&["port"])));

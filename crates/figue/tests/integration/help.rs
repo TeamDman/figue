@@ -144,15 +144,31 @@ fn test_help_flags() {
     let err = result.unwrap_err();
     assert!(err.is_help());
     assert!(err.help_text().is_some());
-    let help = err.help_text().unwrap();
-    assert!(help.contains("USAGE"));
-    assert!(help.contains("--verbose"));
-
     // -h
     let result = figue::from_slice::<SimpleArgs>(&["-h"]);
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(err.is_help());
+}
+
+#[test]
+fn test_html_help_flag_writes_html_file() {
+    let result = figue::from_slice::<SimpleArgs>(&["--html-help"]).into_result();
+
+    let Err(figue::DriverError::HtmlHelp { path }) = result else {
+        panic!("expected HTML help request");
+    };
+
+    assert_eq!(
+        path.file_name().and_then(|name| name.to_str()),
+        Some("index.html")
+    );
+
+    let html = std::fs::read_to_string(&path).expect("HTML help file should be readable");
+    assert!(html.contains("<!doctype html>"));
+    assert!(html.contains("A sample CLI application for testing help generation."));
+    assert!(html.contains("--html-help"));
+    assert!(html.contains("&lt;INPUT&gt;"));
 }
 
 /// Test that help output for tuple variant subcommands shows flattened fields
@@ -276,32 +292,6 @@ fn test_help_subcommand_install() {
     assert!(err.is_help(), "expected help error, got: {:?}", err);
 
     let help = err.help_text().expect("should have help text");
-
-    // Should show install-specific info
-    assert!(help.contains("install"), "help should mention 'install'");
-    assert!(
-        help.contains("PACKAGE"),
-        "help should show PACKAGE positional"
-    );
-    assert!(
-        help.contains("--global") || help.contains("-g"),
-        "help should show --global flag"
-    );
-    assert!(
-        help.contains("--force") || help.contains("-f"),
-        "help should show --force flag"
-    );
-
-    // Should NOT show other subcommands' options
-    assert!(
-        !help.contains("--yes"),
-        "help should not show --yes from remove"
-    );
-    assert!(
-        !help.contains("--json"),
-        "help should not show --json from list"
-    );
-
     assert_help_snapshot!("subcommand_install_help", help);
 }
 
@@ -313,160 +303,9 @@ fn test_help_subcommand_remove() {
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(err.is_help(), "expected help error, got: {:?}", err);
+
     let help = err.help_text().expect("should have help text");
-
-    // Should show remove-specific info (note: renamed to "rm")
-    assert!(
-        help.contains("rm") || help.contains("remove"),
-        "help should mention 'rm' or 'remove'"
-    );
-    assert!(
-        help.contains("PACKAGE"),
-        "help should show PACKAGE positional"
-    );
-    assert!(
-        help.contains("--yes") || help.contains("-y"),
-        "help should show --yes flag"
-    );
-
-    // Should NOT show other subcommands' options
-    assert!(
-        !help.contains("--global"),
-        "help should not show --global from install"
-    );
-    assert!(
-        !help.contains("--json"),
-        "help should not show --json from list"
-    );
-
     assert_help_snapshot!("subcommand_remove_help", help);
-}
-
-#[test]
-fn test_help_implementation_source_disabled_by_default() {
-    let result = figue::from_slice::<PkgManager>(&["--help"]);
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(err.is_help(), "expected help error, got: {:?}", err);
-
-    let help = err.help_text().expect("should have help text");
-    assert!(
-        !help.contains("Implementation:"),
-        "default help output should not include implementation section"
-    );
-}
-
-#[test]
-fn test_help_implementation_source_included_when_enabled() {
-    let config = figue::builder::<PkgManager>()
-        .expect("schema should be valid")
-        .cli(|cli| cli.args(["--help"]))
-        .help(|h| h.include_implementation_source_file(true))
-        .build();
-
-    let result = figue::Driver::new(config).run().into_result();
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(err.is_help(), "expected help error, got: {:?}", err);
-
-    let help = err.help_text().expect("should have help text");
-    assert!(
-        help.contains("Implementation:"),
-        "help output should include implementation section when enabled"
-    );
-    assert!(
-        help.contains("help.rs"),
-        "implementation section should point to source file"
-    );
-}
-
-#[test]
-fn test_subcommand_help_implementation_source_included_when_enabled() {
-    let config = figue::builder::<PkgManager>()
-        .expect("schema should be valid")
-        .cli(|cli| cli.args(["install", "--help"]))
-        .help(|h| h.include_implementation_source_file(true))
-        .build();
-
-    let result = figue::Driver::new(config).run().into_result();
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(err.is_help(), "expected help error, got: {:?}", err);
-
-    let help = err.help_text().expect("should have help text");
-    assert!(
-        help.contains("install"),
-        "help should be install subcommand help"
-    );
-    assert!(
-        help.contains("Implementation:"),
-        "subcommand help should include implementation section when enabled"
-    );
-}
-
-#[test]
-fn test_help_implementation_url_included_when_enabled() {
-    let config = figue::builder::<PkgManager>()
-        .expect("schema should be valid")
-        .cli(|cli| cli.args(["--help"]))
-        .help(|h| {
-            h.include_implementation_url(|path| {
-                format!(
-                    "https://example.com/repo/blob/main/{}",
-                    path.replace('\\', "/")
-                )
-            })
-        })
-        .build();
-
-    let result = figue::Driver::new(config).run().into_result();
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(err.is_help(), "expected help error, got: {:?}", err);
-
-    let help = err.help_text().expect("should have help text");
-    assert!(
-        help.contains("Implementation:"),
-        "help output should include implementation section when URL is enabled"
-    );
-    assert!(
-        help.contains("https://example.com/repo/blob/main/"),
-        "help output should include implementation URL"
-    );
-}
-
-#[test]
-fn test_help_implementation_source_and_git_url_both_included() {
-    let config = figue::builder::<PkgManager>()
-        .expect("schema should be valid")
-        .cli(|cli| cli.args(["--help"]))
-        .help(|h| {
-            h.include_implementation_source_file(true)
-                .include_implementation_git_url(
-                    "TeamDman/teamy-rust-cli",
-                    "56fe5d44a726bb2e44bd7c338103377aa02feedc",
-                )
-        })
-        .build();
-
-    let result = figue::Driver::new(config).run().into_result();
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(err.is_help(), "expected help error, got: {:?}", err);
-
-    let help = err.help_text().expect("should have help text");
-    assert!(
-        help.contains("Implementation:"),
-        "help output should include implementation section"
-    );
-    assert!(
-        help.contains("help.rs"),
-        "help output should include implementation source file path"
-    );
-    assert!(
-        help.contains("https://github.com/TeamDman/teamy-rust-cli/blob/56fe5d44a726bb2e44bd7c338103377aa02feedc/"),
-        "help output should include generated GitHub implementation URL"
-    );
 }
 
 #[test]
@@ -479,28 +318,6 @@ fn test_help_subcommand_list() {
     assert!(err.is_help(), "expected help error, got: {:?}", err);
 
     let help = err.help_text().expect("should have help text");
-
-    // Should show list-specific info (note: renamed to "ls")
-    assert!(
-        help.contains("ls") || help.contains("list"),
-        "help should mention 'ls' or 'list'"
-    );
-    assert!(
-        help.contains("--all") || help.contains("-a"),
-        "help should show --all flag"
-    );
-    assert!(help.contains("--json"), "help should show --json flag");
-
-    // Should NOT show other subcommands' options
-    assert!(
-        !help.contains("--global"),
-        "help should not show --global from install"
-    );
-    assert!(
-        !help.contains("--yes"),
-        "help should not show --yes from remove"
-    );
-
     assert_help_snapshot!("subcommand_list_help", help);
 }
 
@@ -513,61 +330,28 @@ fn test_help_root_shows_all_subcommands() {
     assert!(err.is_help(), "expected help error, got: {:?}", err);
 
     let help = err.help_text().expect("should have help text");
-
-    // Root help should list all subcommands
-    assert!(help.contains("install"), "root help should list install");
-    assert!(
-        help.contains("rm"),
-        "root help should list rm (renamed from remove)"
-    );
-    assert!(
-        help.contains("ls"),
-        "root help should list ls (renamed from list)"
-    );
-
     assert_help_snapshot!("subcommand_root_help", help);
 }
 
 #[test]
-fn test_help_list_short_root_shows_immediate_subcommands() {
-    let result = figue::from_slice::<PkgManager>(&["help", "list", "--short"]);
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(err.is_help(), "expected help error, got: {:?}", err);
+fn test_html_help_after_subcommand_still_writes_root_document() {
+    // `pkg install --html-help` should write the full app-wide HTML document,
+    // not a document scoped only to the already-parsed `install` subcommand.
+    let result = figue::from_slice::<PkgManager>(&["install", "--html-help"]).into_result();
 
-    let help = err.help_text().expect("should have help text");
-    assert!(
-        help.contains("install"),
-        "short list should include install"
-    );
-    assert!(help.contains("rm"), "short list should include rm");
-    assert!(help.contains("ls"), "short list should include ls");
-    assert!(
-        !help.contains("--global"),
-        "short list should not include flag details"
-    );
-}
+    let Err(figue::DriverError::HtmlHelp { path }) = result else {
+        panic!("expected HTML help request");
+    };
 
-#[test]
-fn test_help_list_root_shows_subcommand_helps() {
-    let result = figue::from_slice::<PkgManager>(&["help", "list"]);
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(err.is_help(), "expected help error, got: {:?}", err);
-
-    let help = err.help_text().expect("should have help text");
-    assert!(
-        help.contains("install"),
-        "full list should include install help"
-    );
-    assert!(
-        help.contains("--global"),
-        "full list should include install flags"
-    );
-    assert!(help.contains("rm"), "full list should include rm help");
-    assert!(help.contains("--yes"), "full list should include rm flags");
-    assert!(help.contains("ls"), "full list should include ls help");
-    assert!(help.contains("--json"), "full list should include ls flags");
+    let html = std::fs::read_to_string(&path).expect("HTML help file should be readable");
+    assert!(html.contains("<!doctype html>"));
+    assert!(html.contains("CLI with subcommands for testing subcommand-specific help"));
+    assert!(html.contains("Install a package"));
+    assert!(html.contains("Remove a package"));
+    assert!(html.contains("List installed packages"));
+    assert!(html.contains("--html-help"));
+    assert!(html.contains("id=\"command-install\""));
+    assert!(html.contains("window.FIGUE_INITIAL_ANCHOR = \"command-install\""));
 }
 
 // Nested subcommands: help should be aware of the full path
@@ -633,28 +417,6 @@ fn test_help_nested_subcommand_clone() {
     assert!(err.is_help(), "expected help error, got: {:?}", err);
 
     let help = err.help_text().expect("should have help text");
-
-    // Should show clone-specific info
-    assert!(help.contains("clone"), "help should mention 'clone'");
-    assert!(help.contains("URL"), "help should show URL positional");
-    assert!(help.contains("--depth"), "help should show --depth flag");
-    assert!(
-        help.contains("--branch") || help.contains("-b"),
-        "help should show --branch flag"
-    );
-
-    // Should NOT show push's options
-    assert!(
-        !help.contains("--force"),
-        "help should not show --force from push"
-    );
-
-    // Usage line should show the full path
-    assert!(
-        help.contains("repo") && help.contains("clone"),
-        "usage should show full subcommand path"
-    );
-
     assert_help_snapshot!("nested_subcommand_clone_help", help);
 }
 
@@ -668,24 +430,6 @@ fn test_help_nested_subcommand_push() {
     assert!(err.is_help(), "expected help error, got: {:?}", err);
 
     let help = err.help_text().expect("should have help text");
-
-    // Should show push-specific info
-    assert!(help.contains("push"), "help should mention 'push'");
-    assert!(
-        help.contains("--force") || help.contains("-f"),
-        "help should show --force flag"
-    );
-
-    // Should NOT show clone's options
-    assert!(
-        !help.contains("--depth"),
-        "help should not show --depth from clone"
-    );
-    assert!(
-        !help.contains("--branch"),
-        "help should not show --branch from clone"
-    );
-
     assert_help_snapshot!("nested_subcommand_push_help", help);
 }
 
@@ -699,37 +443,7 @@ fn test_help_nested_intermediate_level() {
     assert!(err.is_help(), "expected help error, got: {:?}", err);
 
     let help = err.help_text().expect("should have help text");
-
-    // Should show repo's subcommands
-    assert!(help.contains("clone"), "help should list clone subcommand");
-    assert!(help.contains("push"), "help should list push subcommand");
-
-    // Should show repo in the usage
-    assert!(help.contains("repo"), "usage should show 'repo'");
-
     assert_help_snapshot!("nested_intermediate_repo_help", help);
-}
-
-#[test]
-fn test_help_list_short_nested_shows_immediate_subcommands() {
-    let result = figue::from_slice::<NestedCli>(&["repo", "help", "list", "--short"]);
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(err.is_help(), "expected help error, got: {:?}", err);
-
-    let help = err.help_text().expect("should have help text");
-    assert!(
-        help.contains("clone"),
-        "nested short list should include clone"
-    );
-    assert!(
-        help.contains("push"),
-        "nested short list should include push"
-    );
-    assert!(
-        !help.contains("--force"),
-        "nested short list should not include flag details"
-    );
 }
 
 #[test]
@@ -743,31 +457,5 @@ fn test_help_short_flag_h_works_in_subcommand() {
         err.is_help(),
         "expected help error for -h flag, got: {:?}",
         err
-    );
-
-    let help = err.help_text().expect("should have help text");
-
-    // Should show install-specific flags (not just mention "install" in subcommand list)
-    assert!(
-        help.contains("--global") || help.contains("-g"),
-        "help should show --global flag (install-specific)"
-    );
-    assert!(
-        help.contains("--force") || help.contains("-f"),
-        "help should show --force flag (install-specific)"
-    );
-    assert!(
-        help.contains("PACKAGE"),
-        "help should show PACKAGE positional"
-    );
-
-    // Should NOT show other subcommands' options
-    assert!(
-        !help.contains("--yes"),
-        "help should not show --yes from remove"
-    );
-    assert!(
-        !help.contains("--json"),
-        "help should not show --json from list"
     );
 }

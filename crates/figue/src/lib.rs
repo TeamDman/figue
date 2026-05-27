@@ -179,6 +179,7 @@ pub(crate) mod env_subst;
 pub(crate) mod error;
 pub(crate) mod extract;
 pub(crate) mod help;
+pub(crate) mod json_schema;
 pub(crate) mod layers;
 pub(crate) mod merge;
 pub(crate) mod missing;
@@ -206,12 +207,16 @@ pub use arbitrary_checks::{
     assert_to_args_consistency, assert_to_args_roundtrip,
 };
 pub use builder::builder;
-pub use config_format::{ConfigFormat, ConfigFormatError, JsonFormat};
+pub use config_format::{ConfigFormat, ConfigFormatError, JsonFormat, JsoncFormat};
 pub use config_value::ConfigValue;
 pub use driver::{Driver, DriverError, DriverOutcome, DriverOutput, DriverReport};
 pub use error::{ArgsErrorKind, ArgsErrorWithInput};
 pub use extract::{ExtractError, ExtractMissingField};
-pub use help::{HelpConfig, generate_help, generate_help_for_shape};
+pub use help::{
+    HelpConfig, generate_help, generate_help_for_shape, generate_html_help,
+    generate_html_help_for_shape, open_html_help_file, write_html_help_to_temp_file,
+};
+pub use json_schema::{JsonSchemaError, JsonSchemaFile, generate_json_schemas, write_json_schemas};
 pub use layers::env::MockEnv;
 pub use layers::file::FormatRegistry;
 pub use to_args::{
@@ -314,7 +319,7 @@ pub fn from_slice<T: Facet<'static>>(args: &[&str]) -> DriverOutcome<T> {
 
 /// Standard CLI builtins that can be flattened into your Args struct.
 ///
-/// This provides the standard `--help`, `--version`, and `--completions` flags
+/// This provides the standard `--help`, `--html-help`, `--version`, and `--completions` flags
 /// that most CLI applications need. Flatten it into your Args struct:
 ///
 /// ```rust
@@ -341,8 +346,10 @@ pub fn from_slice<T: Facet<'static>>(args: &[&str]) -> DriverOutcome<T> {
 ///
 /// The driver automatically handles these fields:
 /// - `--help` / `-h`: Shows help and exits with code 0
+/// - `--html-help`: Opens HTML help in the browser and exits with code 0
 /// - `--version` / `-V`: Shows version and exits with code 0
 /// - `--completions <SHELL>`: Generates shell completions and exits with code 0
+/// - `--export-jsonschemas <DIR>`: Writes one JSON Schema file per config root and exits with code 0
 ///
 /// # Setting the Version
 ///
@@ -398,8 +405,9 @@ pub fn from_slice<T: Facet<'static>>(args: &[&str]) -> DriverOutcome<T> {
 ///
 /// let result = figue::from_slice::<Args>(&["--help"]).into_result();
 /// match result {
-///     Err(DriverError::Help { text }) => {
-///         assert!(text.contains("--help"));
+///     Err(DriverError::Help { text, .. }) => {
+///         // text contains the full help output
+///         let _ = text;
 ///     }
 ///     _ => panic!("expected help"),
 /// }
@@ -410,6 +418,10 @@ pub struct FigueBuiltins {
     #[facet(args::named, args::short = 'h', args::help, default)]
     pub help: bool,
 
+    /// Open HTML help in the browser and exit.
+    #[facet(args::named, default)]
+    pub html_help: bool,
+
     /// Show version and exit.
     #[facet(args::named, args::short = 'V', args::version, default)]
     pub version: bool,
@@ -417,6 +429,10 @@ pub struct FigueBuiltins {
     /// Generate shell completions.
     #[facet(args::named, args::completions, default)]
     pub completions: Option<Shell>,
+
+    /// Export JSON Schema files for all config roots.
+    #[facet(args::named, args::export_jsonschemas, args::label = "DIR", default)]
+    pub export_jsonschemas: Option<String>,
 }
 
 #[cfg(test)]
@@ -445,9 +461,19 @@ mod tests {
     #[test]
     fn test_figue_builtins_in_help() {
         let help = generate_help::<ArgsWithBuiltins>(&HelpConfig::default());
-        assert!(help.contains("--help"), "help should contain --help");
+        assert!(
+            help.contains("--[no-]help"),
+            "help should contain --[no-]help"
+        );
         assert!(help.contains("-h"), "help should contain -h");
-        assert!(help.contains("--version"), "help should contain --version");
+        assert!(
+            help.contains("--[no-]html-help"),
+            "help should contain --[no-]html-help"
+        );
+        assert!(
+            help.contains("--[no-]version"),
+            "help should contain --[no-]version"
+        );
         assert!(help.contains("-V"), "help should contain -V");
         assert!(
             help.contains("--completions"),
@@ -469,6 +495,13 @@ mod tests {
         assert!(special.help.is_some(), "help should be detected");
         assert_eq!(special.help.as_ref().unwrap(), &vec!["help".to_string()]);
 
+        // HTML help at top level
+        assert!(special.html_help.is_some(), "html_help should be detected");
+        assert_eq!(
+            special.html_help.as_ref().unwrap(),
+            &vec!["html_help".to_string()]
+        );
+
         // Version at top level
         assert!(special.version.is_some(), "version should be detected");
         assert_eq!(
@@ -484,6 +517,15 @@ mod tests {
         assert_eq!(
             special.completions.as_ref().unwrap(),
             &vec!["completions".to_string()]
+        );
+
+        assert!(
+            special.export_jsonschemas.is_some(),
+            "export_jsonschemas should be detected"
+        );
+        assert_eq!(
+            special.export_jsonschemas.as_ref().unwrap(),
+            &vec!["export_jsonschemas".to_string()]
         );
     }
 

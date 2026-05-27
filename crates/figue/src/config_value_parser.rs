@@ -96,15 +96,16 @@ pub(crate) fn fill_defaults_from_schema(value: &ConfigValue, schema: &Schema) ->
     // Fill defaults for args-level fields (already flattened in schema.args())
     fill_defaults_from_arg_level(&mut new_map, schema.args(), "");
 
-    // Fill defaults for config field if present
-    if let Some(config_schema) = schema.config() {
+    // Fill defaults for config fields if present
+    for config_schema in schema.configs() {
         let config_field_name = config_schema.field_name().unwrap_or("config").to_string();
 
         if let Some(config_value) = new_map.get(&config_field_name) {
             let filled = fill_defaults_from_config_struct(config_value, config_schema, "");
             new_map.insert(config_field_name, filled);
-        } else {
-            // Config field missing - create it with defaults
+        } else if !config_schema.optional_root() {
+            // Required config field missing - create it with defaults.
+            // Optional config roots should stay absent so they deserialize as None.
             let filled = fill_defaults_from_config_struct(
                 &ConfigValue::Object(Sourced::new(IndexMap::default())),
                 config_schema,
@@ -945,14 +946,13 @@ fn get_default_config_value(
         return None;
     }
 
-    // Option<T> implicitly has Default semantics (None)
-    // Check type_identifier for "Option" - handles both std::option::Option and core::option::Option
+    // Option<T> implicitly has Default semantics (None).
+    // We don't insert ConfigValue::Null here because the facet deserializer
+    // may mishandle Null for flattened fields inside enum variants.
+    // Instead, leave the field missing and let facet apply the natural
+    // Default for Option<T>, which is None.
     if shape.type_identifier.contains("Option") {
-        return Some(ConfigValue::Null(Sourced {
-            value: (),
-            span: None,
-            provenance: Some(Provenance::Default),
-        }));
+        return None;
     }
 
     // For struct types without explicit defaults, create empty object for recursive filling
@@ -2422,5 +2422,55 @@ mod fill_defaults_tests {
         } else {
             panic!("expected enum");
         }
+    }
+
+    // Test 8: Enum with flatten containing Option<String> fields
+    #[derive(Facet, Debug)]
+    struct TranscribeArgs {
+        config: Option<String>,
+        language: Option<String>,
+        pulse_limit: Option<usize>,
+    }
+
+    #[derive(Facet, Debug)]
+    #[repr(u8)]
+    #[allow(dead_code)]
+    enum EnumWithFlattenOption {
+        Run {
+            #[facet(flatten)]
+            args: TranscribeArgs,
+        },
+    }
+
+    #[test]
+    fn test_fill_defaults_enum_flatten_option_fields() {
+        let fields = IndexMap::default();
+        let input = ConfigValue::Enum(Sourced::new(crate::config_value::EnumValue {
+            variant: "Run".to_string(),
+            fields,
+        }));
+        let result = fill_defaults_from_shape(&input, EnumWithFlattenOption::SHAPE);
+
+        if let ConfigValue::Enum(e) = &result {
+            println!("result fields: {:#?}", e.value.fields);
+
+            // Option fields should NOT be filled - they stay missing
+            // and the facet deserializer provides None by default.
+            assert!(!e.value.fields.contains_key("config"));
+            assert!(!e.value.fields.contains_key("language"));
+            assert!(!e.value.fields.contains_key("pulse_limit"));
+        } else {
+            panic!("expected enum, got {:?}", result);
+        }
+
+        // Now try full deserialization
+        let deserialized: EnumWithFlattenOption =
+            from_config_value(&input).expect("deserialization should succeed");
+        println!("deserialized: {:?}", deserialized);
+
+        let EnumWithFlattenOption::Run { args } = &deserialized;
+        assert_eq!(args.config, None);
+        assert_eq!(args.language, None);
+        assert_eq!(args.pulse_limit, None);
     }
 }

@@ -54,6 +54,7 @@
 #![allow(private_interfaces)]
 
 use std::marker::PhantomData;
+use std::path::{Path, PathBuf};
 use std::string::String;
 use std::sync::Arc;
 
@@ -64,6 +65,9 @@ use facet_reflect::ReflectError;
 use crate::{
     config_format::{ConfigFormat, ConfigFormatError},
     help::HelpConfig,
+    json_schema::{
+        JsonSchemaError, JsonSchemaFile, generate_json_schemas_for_schema, write_json_schema_files,
+    },
     layers::{
         cli::{CliConfig, CliConfigBuilder},
         env::{EnvConfig, EnvConfigBuilder},
@@ -264,7 +268,7 @@ impl<T> ConfigBuilder<T> {
     ///
     /// let result = Driver::new(config).run().into_result();
     /// match result {
-    ///     Err(DriverError::Help { text }) => {
+    ///     Err(DriverError::Help { text, .. }) => {
     ///         assert!(text.contains("myapp"));
     ///     }
     ///     _ => panic!("expected help"),
@@ -346,7 +350,7 @@ impl<T> ConfigBuilder<T> {
     /// // Use inline content for testing (avoids file I/O)
     /// let config = builder::<Args>()
     ///     .unwrap()
-    ///     .file(|f| f.content(r#"{"port": 9000}"#, "config.json"))
+    ///     .file(|f| f.content(r#"{"config": {"port": 9000}}"#, "config.json"))
     ///     .build();
     ///
     /// let output = Driver::new(config).run().into_result().unwrap();
@@ -391,6 +395,34 @@ impl<T> ConfigBuilder<T> {
             file_config: self.file_config,
             _phantom: PhantomData,
         }
+    }
+
+    /// Generate one JSON Schema document per config root.
+    pub fn generate_json_schemas(&self) -> Vec<JsonSchemaFile> {
+        generate_json_schemas_for_schema(&self.schema)
+    }
+
+    /// Write one JSON Schema file per config root to `output_dir`.
+    pub fn write_json_schemas(
+        &self,
+        output_dir: impl AsRef<Path>,
+    ) -> Result<Vec<PathBuf>, JsonSchemaError> {
+        write_json_schema_files(output_dir, &self.generate_json_schemas())
+    }
+}
+
+impl<T> Config<T> {
+    /// Generate one JSON Schema document per config root.
+    pub fn generate_json_schemas(&self) -> Vec<JsonSchemaFile> {
+        generate_json_schemas_for_schema(&self.schema)
+    }
+
+    /// Write one JSON Schema file per config root to `output_dir`.
+    pub fn write_json_schemas(
+        &self,
+        output_dir: impl AsRef<Path>,
+    ) -> Result<Vec<PathBuf>, JsonSchemaError> {
+        write_json_schema_files(output_dir, &self.generate_json_schemas())
     }
 }
 
@@ -575,7 +607,7 @@ impl HelpConfigBuilder {
 /// // Load from inline JSON (useful for testing)
 /// let config = builder::<Args>()
 ///     .unwrap()
-///     .file(|f| f.content(r#"{"host": "0.0.0.0", "port": 3000}"#, "config.json"))
+///     .file(|f| f.content(r#"{"config": {"host": "0.0.0.0", "port": 3000}}"#, "config.json"))
 ///     .build();
 ///
 /// let output = Driver::new(config).run().into_result().unwrap();
@@ -668,7 +700,7 @@ impl FileConfigBuilder {
     ///
     /// let config = builder::<Args>()
     ///     .unwrap()
-    ///     .file(|f| f.content(r#"{"port": 9000}"#, "test.json"))
+    ///     .file(|f| f.content(r#"{"config": {"port": 9000}}"#, "test.json"))
     ///     .build();
     ///
     /// let output = Driver::new(config).run().into_result().unwrap();
@@ -842,7 +874,6 @@ mod tests {
             .strict()
             .build();
 
-        // explicit_path is set by the driver when CLI provides --config <path>
         assert_eq!(config.explicit_path, None);
         assert_eq!(config.default_paths.len(), 2);
         assert!(config.strict);
