@@ -72,6 +72,7 @@ fn has_any_args_attr(field: &Field) -> bool {
         || field.has_attr(Some("args"), "subcommand")
         || field.has_attr(Some("args"), "config")
         || field.has_attr(Some("args"), "short")
+        || field.has_attr(Some("args"), "alias")
         || field.has_attr(Some("args"), "counted")
         || field.has_attr(Some("args"), "env_prefix")
         || field.is_flattened()
@@ -343,6 +344,29 @@ fn enum_variants(enum_type: EnumType) -> Vec<String> {
 
 fn variant_cli_name(variant: &Variant) -> String {
     variant.effective_name().to_kebab_case()
+}
+
+/// Extract all long-form aliases from a subcommand enum variant's
+/// `#[facet(args::alias = "...")]` attributes.
+fn extract_variant_aliases(variant: &Variant) -> Vec<String> {
+    let mut aliases = Vec::new();
+
+    for variant_attr in variant.attributes {
+        if variant_attr.ns == Some("args") && variant_attr.key == "alias" {
+            if let Some(parsed) = variant_attr.get_as::<Attr>()
+                && let Attr::Alias(alias) = parsed
+            {
+                aliases.push(alias.to_string());
+                continue;
+            }
+
+            if let Some(alias) = variant_attr.get_as::<&str>() {
+                aliases.push(alias.to_string());
+            }
+        }
+    }
+
+    aliases
 }
 
 fn leaf_schema_from_shape(
@@ -1088,6 +1112,7 @@ fn arg_level_from_fields_with_prefix(
 
             for variant in enum_type.variants {
                 let cli_name = variant_cli_name(variant);
+                let aliases = extract_variant_aliases(variant);
                 // effective_name respects #[facet(rename = "...")], used for deserialization
                 let effective_name = variant.effective_name().to_string();
                 let docs = docs_from_lines(variant.doc);
@@ -1120,8 +1145,25 @@ fn arg_level_from_fields_with_prefix(
                     seen_subcommand_short.insert(short, variant_ctx.clone());
                 }
 
+                let mut seen_variant_spellings = std::collections::HashSet::new();
+                seen_variant_spellings.insert(cli_name.clone());
+                if let Some(short) = short {
+                    seen_variant_spellings.insert(short.to_string());
+                }
+                for alias in &aliases {
+                    if !seen_variant_spellings.insert(alias.clone()) {
+                        return Err(SchemaError::new(
+                            variant_ctx.clone(),
+                            format!(
+                                "duplicate subcommand alias `{alias}` for subcommand `{cli_name}`"
+                            ),
+                        ));
+                    }
+                }
+
                 let sub = Subcommand {
                     name: cli_name.clone(),
+                    aliases: aliases.clone(),
                     effective_name: effective_name.clone(),
                     docs,
                     short,
@@ -1139,6 +1181,22 @@ fn arg_level_from_fields_with_prefix(
                     .with_label(variant_ctx, "defined again here"));
                 }
                 seen_subcommands.insert(cli_name.clone(), variant_ctx.clone());
+
+                for alias in &aliases {
+                    if let Some(existing_ctx) = seen_subcommands.get(alias) {
+                        return Err(SchemaError::new(
+                            existing_ctx.clone(),
+                            format!("duplicate subcommand name `{alias}`"),
+                        )
+                        .with_primary_label("first defined here")
+                        .with_label(
+                            variant_ctx.clone(),
+                            format!("alias `{alias}` defined again here"),
+                        ));
+                    }
+                    seen_subcommands.insert(alias.clone(), variant_ctx.clone());
+                }
+
                 subcommands.insert(effective_name, sub);
             }
 

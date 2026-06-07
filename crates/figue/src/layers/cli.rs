@@ -1042,21 +1042,15 @@ impl<'a> ParseContext<'a> {
     }
 
     fn try_parse_subcommand(&mut self, level: &'a ArgLevelSchema) -> bool {
+        let Some(field_name) = level.subcommand_field_name() else {
+            return self.try_parse_help_pseudo_subcommand(level);
+        };
+
         let arg = self.args[self.index];
 
-        if let Some(field_name) = level.subcommand_field_name() {
-            // Find subcommand by long name (kebab-case) or short alias token ("d").
-            let subcommand = level.subcommands().iter().find(|(name, sub)| {
-                name.to_kebab_case() == arg
-                    || sub
-                        .short()
-                        .is_some_and(|short| arg.chars().eq(core::iter::once(short)))
-            });
-
-            if let Some((_, subcommand)) = subcommand {
-                self.consume_subcommand(level, field_name, subcommand, arg);
-                return true;
-            }
+        if let Some(subcommand) = level.find_subcommand(arg) {
+            self.consume_subcommand(level, field_name, subcommand, arg);
+            return true;
         }
 
         self.try_parse_help_pseudo_subcommand(level)
@@ -1100,11 +1094,7 @@ impl<'a> ParseContext<'a> {
         }
 
         // If the application defines a real `help` subcommand, it must take precedence.
-        if level
-            .subcommands()
-            .keys()
-            .any(|name| name.to_kebab_case() == "help")
-        {
+        if level.has_subcommand_named("help") {
             return false;
         }
 
@@ -1321,14 +1311,15 @@ impl<'a> ParseContext<'a> {
             return String::new();
         }
 
-        // Get all subcommand names in kebab-case
-        let subcommand_names: Vec<String> = level
-            .subcommands()
-            .iter()
-            .map(|(name, _)| name.to_kebab_case())
-            .collect();
+        let mut spellings_to_canonical: Vec<(&str, &str)> = Vec::new();
+        for subcommand in level.subcommands().values() {
+            spellings_to_canonical.push((subcommand.cli_name(), subcommand.cli_name()));
+            for alias in subcommand.aliases() {
+                spellings_to_canonical.push((alias.as_str(), subcommand.cli_name()));
+            }
+        }
 
-        crate::suggest::suggest_subcommand(arg, subcommand_names.iter().map(|s| s.as_str()))
+        crate::suggest::suggest_subcommand(arg, spellings_to_canonical)
     }
 
     fn try_parse_positional(&mut self, level: &ArgLevelSchema) -> bool {

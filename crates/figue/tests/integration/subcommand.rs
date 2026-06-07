@@ -211,6 +211,38 @@ fn test_subcommand_kebab_case() {
     assert_eq!(args.command, Command::CleanBuild);
 }
 
+/// Test long-form subcommand aliases resolve to the canonical variant.
+#[test]
+fn test_subcommand_long_alias() {
+    #[derive(Facet, Debug, PartialEq)]
+    struct ProfileArgs {
+        #[facet(args::named, default)]
+        verbose: bool,
+    }
+
+    #[derive(Facet, Debug, PartialEq)]
+    #[repr(u8)]
+    enum Command {
+        #[facet(args::alias = "profiles")]
+        Profile(ProfileArgs),
+    }
+
+    #[derive(Facet, Debug, PartialEq)]
+    struct Args {
+        #[facet(args::subcommand)]
+        command: Command,
+    }
+
+    let canonical: Args = figue::from_slice(&["profile", "--verbose"]).unwrap();
+    assert_eq!(
+        canonical.command,
+        Command::Profile(ProfileArgs { verbose: true })
+    );
+
+    let alias: Args = figue::from_slice(&["profiles", "--verbose"]).unwrap();
+    assert_eq!(alias.command, canonical.command);
+}
+
 /// Test struct with a subcommand field
 #[test]
 fn test_struct_with_subcommand() {

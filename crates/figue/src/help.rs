@@ -2777,6 +2777,11 @@ fn write_subcommand_help(out: &mut String, sub: &Subcommand, config: &HelpConfig
         out.push_str(&wrap_text(summary.trim(), "            ", config.width));
     }
 
+    if !sub.aliases().is_empty() {
+        out.push_str("\n            ");
+        out.push_str(&format!("aliases: {}", sub.aliases().join(", ")));
+    }
+
     out.push('\n');
 }
 

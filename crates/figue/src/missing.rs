@@ -54,6 +54,8 @@ pub enum MissingFieldKind {
 pub struct AvailableSubcommand {
     /// CLI name (kebab-case)
     pub name: String,
+    /// Additional compatibility aliases.
+    pub aliases: Vec<String>,
     /// Doc summary if available
     pub doc: Option<String>,
 }
@@ -271,6 +273,7 @@ fn collect_missing_in_arg_level(
                 .iter()
                 .map(|(_, sub)| AvailableSubcommand {
                     name: sub.cli_name().to_string(),
+                    aliases: sub.aliases().to_vec(),
                     doc: sub.docs().summary().map(|s| s.to_string()),
                 })
                 .collect();

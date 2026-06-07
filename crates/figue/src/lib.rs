@@ -106,6 +106,7 @@
 //!         release: bool,
 //!     },
 //!     /// Run the project
+//!     #[facet(args::alias = "execute")]
 //!     Run {
 //!         /// Arguments to pass through
 //!         #[facet(args::positional)]
@@ -129,6 +130,7 @@
 //! | `args::positional` | Mark field as positional argument |
 //! | `args::named` | Mark field as named flag (--flag) |
 //! | `args::short = 'x'` | Add short flag (-x) |
+//! | `args::alias = "x"` | Add an extra long-form subcommand alias |
 //! | `args::counted` | Count occurrences (-vvv = 3) |
 //! | `args::subcommand` | Mark field as subcommand selector |
 //! | `args::config` | Mark field as layered config struct |

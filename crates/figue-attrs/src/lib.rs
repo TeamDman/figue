@@ -43,6 +43,14 @@ facet::define_attr_grammar! {
         ///
         /// Usage: `#[facet(args::short = 'v')]` or just `#[facet(args::short)]`
         Short(Option<char>),
+        /// Specifies an additional long-form alias for a subcommand variant.
+        ///
+        /// The alias is accepted in addition to the canonical subcommand name.
+        ///
+        /// Multiple aliases can be specified by repeating the attribute.
+        ///
+        /// Usage: `#[facet(args::alias = "profiles")]`
+        Alias(&'static str),
         /// Marks a field as a subcommand.
         ///
         /// The field type must be an enum where each variant represents a subcommand.
