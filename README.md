@@ -5,6 +5,7 @@ I am publishing this fork so I can publish `teamy-mft`, which depends on fork-sp
 Notable differences in this fork include:
 
 - first-class long-form CLI flag aliases for named args via `#[facet(args::long_alias = "...")]`
+- long-form subcommand aliases via `#[facet(args::alias = "...")]`
 - schema-driven `to_args` support and roundtrip helpers
 - arbitrary-based test helpers and default arbitrary test configs
 - fixes for transparent CLI args and `to_args` roundtrips

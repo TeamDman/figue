@@ -203,5 +203,30 @@ flag shorts, subcommand shorts live in their own namespace, so a `-d` flag and a
 alias colliding with another subcommand's name, is rejected at startup with a
 [schema error](@/reference/errors.md#schemaerror).
 
+## Long-form aliases for subcommands
+
+Variants may also carry one or more compatibility aliases with
+`#[facet(args::alias = "profiles")]`:
+
+```rust,noexec
+#[derive(Facet, Debug)]
+#[repr(u8)]
+enum Command {
+    #[facet(args::alias = "profiles")]
+    Profile,
+}
+
+let canonical: Command = figue::from_slice(&["profile"]).unwrap();
+let alias: Command = figue::from_slice(&["profiles"]).unwrap();
+assert!(matches!(canonical, Command::Profile));
+assert!(matches!(alias, Command::Profile));
+```
+
+Aliases participate in help, completions, and unknown-subcommand suggestions,
+but the canonical kebab-case (or `rename`) spelling remains the primary one
+shown in generated output. Duplicate aliases on one variant, or collisions with
+another subcommand's name or alias, are rejected at startup with a
+[schema error](@/reference/errors.md#schemaerror).
+
 Continue to [Config Files](@/guide/config-files.md) to start layering
 configuration sources.

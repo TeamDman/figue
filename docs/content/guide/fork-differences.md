@@ -61,6 +61,33 @@ Behavior:
 - Schema validation rejects duplicate aliases and alias collisions with other
   canonical long names or aliases.
 
+### Long-form subcommand aliases
+
+The fork supports repeatable `args::alias` attributes on subcommand variants:
+
+```rust,noexec
+#[derive(Facet, Debug)]
+#[repr(u8)]
+enum Command {
+    #[facet(args::alias = "profiles")]
+    Profile,
+}
+```
+
+This is a fork-specific extension intended for command migrations where one
+variant should accept an old and new CLI spelling.
+
+Behavior:
+
+- `profile` and `profiles` both select the same enum variant.
+- The canonical subcommand name remains the one used for generated args and
+  help; aliases are shown after it.
+- Completions include aliases.
+- Unknown-subcommand suggestions consider aliases.
+- Alias spellings work at any nesting level where the subcommand appears.
+- Schema validation rejects duplicate aliases on one variant and collisions with
+  other canonical subcommand names or aliases.
+
 ### Schema-driven `to_args` support
 
 The fork includes schema-driven `to_args` support and roundtrip helpers beyond

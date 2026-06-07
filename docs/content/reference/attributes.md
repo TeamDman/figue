@@ -49,6 +49,22 @@ boolean `--no-...` negation.
 drive: Option<String>, // --drive and --drive-letter-pattern
 ```
 
+### `args::alias = "old-name"`
+
+Add an additional accepted long-form subcommand spelling for an enum variant.
+Repeatable. The canonical subcommand name still comes from the variant name (or
+`rename`), and aliases are accepted for parsing, suggestions, help, and
+completions.
+
+```rust,noexec
+#[derive(Facet, Debug)]
+#[repr(u8)]
+enum Command {
+    #[facet(args::alias = "profiles")]
+    Profile,
+}
+```
+
 ### `args::short`
 
 `args::short = 'v'` adds `-v`. Bare `args::short` uses the first letter of the

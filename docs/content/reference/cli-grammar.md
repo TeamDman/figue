@@ -95,7 +95,8 @@ For a config root with effective field name `F` (CLI root = `F` kebab-cased):
 
 ## Subcommands
 
-- Selected by kebab-cased variant name or its one-character `args::short` alias.
+- Selected by kebab-cased variant name, any `args::alias` spelling, or its
+  one-character `args::short` alias.
 - "Adoption agency": a flag/`--no-`/counted flag not found at the current
   subcommand level bubbles up the parent stack before becoming an error — this
   is what makes parent/global flags usable after the subcommand.

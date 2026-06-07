@@ -87,6 +87,30 @@ struct Args {
 }
 ```
 
+## Long-form flag aliases
+
+Add `#[facet(args::long_alias = "...")]` when a named argument should accept an
+older or alternate flag spelling too:
+
+```rust,noexec
+#[derive(Facet, Debug)]
+struct Args {
+    #[facet(
+        args::named,
+        rename = "drive",
+        args::long_alias = "drive-letter-pattern",
+    )]
+    drive: Option<String>,
+}
+
+let a: Args = figue::from_slice(&["--drive-letter-pattern", "D:*"]).unwrap();
+assert_eq!(a.drive.as_deref(), Some("D:*"));
+```
+
+The canonical flag still comes from the field name (or `rename`). Aliases are
+accepted for parsing, shown in help after the canonical spelling, included in
+shell completions, and also get `--no-...` negation for boolean flags.
+
 ## Short flags
 
 Add `#[facet(args::short = 'x')]` for a single-character alias:

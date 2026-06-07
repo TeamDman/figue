@@ -62,6 +62,7 @@ again. The full catalog:
 | `duplicate flag \`--x\`` / `duplicate flag \`-x\`` | two args resolve to the same long/short flag |
 | `duplicate argument \`x\`` | two args share an effective name |
 | `duplicate subcommand name \`x\`` | two variants resolve to the same CLI name |
+| `duplicate subcommand alias \`x\` for subcommand \`y\`` | one variant repeats the same `args::alias` |
 | `duplicate subcommand short alias \`x\`` | two variants share an `args::short` |
 | `subcommand short alias \`x\` conflicts with existing subcommand name` | alias equals another subcommand's name |
 | `env alias \`x\` is used by both \`a\` and \`b\`` | two fields share an `args::env_alias` |
