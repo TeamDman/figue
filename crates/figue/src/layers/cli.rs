@@ -441,8 +441,9 @@ impl<'a> ParseContext<'a> {
             });
 
             // Determine target and flag info
-            let (target, name, is_bool, is_counted, is_multiple) =
-                if let Some((name, arg_schema)) = found {
+            let (target, name, is_bool, is_counted, is_multiple) = if let Some((name, arg_schema)) =
+                found
+            {
                 let is_counted = matches!(arg_schema.kind(), ArgKind::Named { counted: true, .. });
                 let is_bool = arg_schema
                     .value()
@@ -532,29 +533,29 @@ impl<'a> ParseContext<'a> {
         // Determine target and flag info
         let (target, name, is_bool, is_counted, is_multiple) =
             if let Some((name, arg_schema)) = found {
-            let is_counted = matches!(arg_schema.kind(), ArgKind::Named { counted: true, .. });
-            let is_bool = arg_schema.value().inner_if_option().is_bool();
-            let is_multiple = arg_schema.multiple();
-            (
-                InsertTarget::Current,
-                name.to_string(),
-                is_bool,
-                is_counted,
-                is_multiple,
-            )
-        } else if let Some(lookup) = self.find_short_flag_in_parents(ch) {
-            // Adoption agency: flag found in parent level
-            (
-                InsertTarget::Parent(lookup.parent_idx),
-                lookup.effective_name,
-                lookup.is_bool,
-                lookup.is_counted,
-                lookup.is_multiple,
-            )
-        } else {
-            self.emit_error(format!("unknown flag: -{}", ch));
-            return;
-        };
+                let is_counted = matches!(arg_schema.kind(), ArgKind::Named { counted: true, .. });
+                let is_bool = arg_schema.value().inner_if_option().is_bool();
+                let is_multiple = arg_schema.multiple();
+                (
+                    InsertTarget::Current,
+                    name.to_string(),
+                    is_bool,
+                    is_counted,
+                    is_multiple,
+                )
+            } else if let Some(lookup) = self.find_short_flag_in_parents(ch) {
+                // Adoption agency: flag found in parent level
+                (
+                    InsertTarget::Parent(lookup.parent_idx),
+                    lookup.effective_name,
+                    lookup.is_bool,
+                    lookup.is_counted,
+                    lookup.is_multiple,
+                )
+            } else {
+                self.emit_error(format!("unknown flag: -{}", ch));
+                return;
+            };
 
         if is_counted {
             self.increment_counted_to(target, &name);
@@ -763,13 +764,7 @@ impl<'a> ParseContext<'a> {
 
         let arg = self.args[self.index];
 
-        // Find subcommand by comparing user input with kebab-case of effective_name
-        let subcommand = level
-            .subcommands()
-            .iter()
-            .find(|(name, _)| name.to_kebab_case() == arg);
-
-        if let Some((_, subcommand)) = subcommand {
+        if let Some(subcommand) = level.find_subcommand(arg) {
             self.index += 1;
             let fields = self.parse_subcommand_args(level, subcommand);
 
@@ -809,11 +804,7 @@ impl<'a> ParseContext<'a> {
         }
 
         // If the application defines a real `help` subcommand, it must take precedence.
-        if level
-            .subcommands()
-            .keys()
-            .any(|name| name.to_kebab_case() == "help")
-        {
+        if level.has_subcommand_named("help") {
             return false;
         }
 
@@ -962,14 +953,15 @@ impl<'a> ParseContext<'a> {
             return String::new();
         }
 
-        // Get all subcommand names in kebab-case
-        let subcommand_names: Vec<String> = level
-            .subcommands()
-            .iter()
-            .map(|(name, _)| name.to_kebab_case())
-            .collect();
+        let mut spellings_to_canonical: Vec<(&str, &str)> = Vec::new();
+        for subcommand in level.subcommands().values() {
+            spellings_to_canonical.push((subcommand.cli_name(), subcommand.cli_name()));
+            for alias in subcommand.aliases() {
+                spellings_to_canonical.push((alias.as_str(), subcommand.cli_name()));
+            }
+        }
 
-        crate::suggest::suggest_subcommand(arg, subcommand_names.iter().map(|s| s.as_str()))
+        crate::suggest::suggest_subcommand(arg, spellings_to_canonical)
     }
 
     fn try_parse_positional(&mut self, level: &ArgLevelSchema) -> bool {
@@ -1079,8 +1071,10 @@ impl<'a> ParseContext<'a> {
                         });
                         let old = core::mem::replace(existing, placeholder);
                         let wrapper_span = old.span().or(value.span());
-                        let wrapper_provenance =
-                            old.provenance().cloned().or_else(|| value.provenance().cloned());
+                        let wrapper_provenance = old
+                            .provenance()
+                            .cloned()
+                            .or_else(|| value.provenance().cloned());
                         *existing = ConfigValue::Array(Sourced {
                             value: vec![old, value],
                             span: wrapper_span,

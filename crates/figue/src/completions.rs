@@ -113,11 +113,12 @@ fn generate_bash_function(
     // Build commands string
     if !subcommands.is_empty() {
         out.push_str("    local commands=\"");
-        for (i, cmd) in subcommands.iter().enumerate() {
+        let command_names: Vec<&str> = subcommands.iter().flat_map(|cmd| cmd.all_names()).collect();
+        for (i, cmd) in command_names.iter().enumerate() {
             if i > 0 {
                 out.push(' ');
             }
-            out.push_str(&cmd.name);
+            out.push_str(cmd);
         }
         out.push_str("\"\n");
     } else {
@@ -194,9 +195,10 @@ fn generate_bash_function(
             } else {
                 format!("{}_{}", func_name, cmd.name.replace('-', "_"))
             };
+            let case_patterns = cmd.all_names().collect::<Vec<_>>().join("|");
             out.push_str(&format!(
                 "            {})\n                _{sub_func}\n                return\n                ;;\n",
-                cmd.name
+                case_patterns
             ));
         }
 
@@ -329,6 +331,10 @@ fn generate_zsh_function(
                 "        '{name}:{escaped_desc}'\n",
                 name = cmd.name
             ));
+            for alias in &cmd.aliases {
+                let alias_desc = escape_zsh_description(&format!("Alias for {}", cmd.name));
+                out.push_str(&format!("        '{alias}:{alias_desc}'\n"));
+            }
         }
         out.push_str("    )\n\n");
 
@@ -352,9 +358,10 @@ fn generate_zsh_function(
         // Add case for each subcommand
         for cmd in &subcommands {
             let sub_func = format!("{}_{}", func_name, cmd.name.replace('-', "_"));
+            let case_patterns = cmd.all_names().collect::<Vec<_>>().join("|");
             out.push_str(&format!(
                 "                {name})\n                    _{sub_func} && ret=0\n                    ;;\n",
-                name = cmd.name,
+                name = case_patterns,
             ));
         }
 
@@ -412,7 +419,12 @@ fn generate_fish(args: &ArgLevelSchema, program_name: &str) -> String {
     out
 }
 
-fn generate_fish_level(out: &mut String, args: &ArgLevelSchema, program_name: &str, path: &[&str]) {
+fn generate_fish_level(
+    out: &mut String,
+    args: &ArgLevelSchema,
+    program_name: &str,
+    path: &[SubcommandInfo],
+) {
     let (flags, subcommands) = collect_options(args);
 
     // Build the condition for this level
@@ -422,14 +434,24 @@ fn generate_fish_level(out: &mut String, args: &ArgLevelSchema, program_name: &s
         // Check that we're in this subcommand context
         let seen_checks: Vec<String> = path
             .iter()
-            .map(|cmd| format!("__fish_seen_subcommand_from {cmd}"))
+            .map(|cmd| {
+                format!(
+                    "__fish_seen_subcommand_from {}",
+                    cmd.all_names().collect::<Vec<_>>().join(" ")
+                )
+            })
             .collect();
         seen_checks.join("; and ")
     };
 
     // Add comment for this level
     if !path.is_empty() {
-        out.push_str(&format!("\n# {} subcommand\n", path.join(" ")));
+        let path_label = path
+            .iter()
+            .map(|cmd| cmd.name.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        out.push_str(&format!("\n# {path_label} subcommand\n"));
     }
 
     // Add flag completions for this level
@@ -467,7 +489,7 @@ fn generate_fish_level(out: &mut String, args: &ArgLevelSchema, program_name: &s
         ));
 
         // Build condition that no subcommand of THIS level has been seen yet
-        let sub_names: Vec<&str> = subcommands.iter().map(|s| s.name.as_str()).collect();
+        let sub_names: Vec<&str> = subcommands.iter().flat_map(|s| s.all_names()).collect();
         let no_sub_condition = if path.is_empty() {
             "__fish_use_subcommand".to_string()
         } else {
@@ -480,15 +502,22 @@ fn generate_fish_level(out: &mut String, args: &ArgLevelSchema, program_name: &s
 
         for cmd in &subcommands {
             let desc = cmd.doc.as_deref().unwrap_or("");
-            out.push_str(&format!(
-                "complete -c {program_name} -n '{no_sub_condition}' -f -a {name}",
-                name = cmd.name
-            ));
-            if !desc.is_empty() {
-                let escaped_desc = desc.replace('\'', "'\\''");
-                out.push_str(&format!(" -d '{escaped_desc}'"));
+            let names = cmd.all_names().collect::<Vec<_>>();
+            for name in names {
+                out.push_str(&format!(
+                    "complete -c {program_name} -n '{no_sub_condition}' -f -a {name}"
+                ));
+                let display_desc = if name == cmd.name {
+                    desc.to_string()
+                } else {
+                    format!("Alias for {}", cmd.name)
+                };
+                if !display_desc.is_empty() {
+                    let escaped_desc = display_desc.replace('\'', "'\\''");
+                    out.push_str(&format!(" -d '{escaped_desc}'"));
+                }
+                out.push('\n');
             }
-            out.push('\n');
         }
     }
 }
@@ -497,11 +526,11 @@ fn generate_fish_subcommands(
     out: &mut String,
     args: &ArgLevelSchema,
     program_name: &str,
-    path: &[&str],
+    path: &[SubcommandInfo],
 ) {
     for (_, sub) in args.subcommands() {
         let mut new_path = path.to_vec();
-        new_path.push(sub.cli_name());
+        new_path.push(subcommand_to_info(sub));
         generate_fish_level(out, sub.args(), program_name, &new_path);
         generate_fish_subcommands(out, sub.args(), program_name, &new_path);
     }
@@ -516,9 +545,17 @@ struct FlagInfo {
     takes_value: bool,
 }
 
+#[derive(Clone)]
 struct SubcommandInfo {
     name: String,
+    aliases: Vec<String>,
     doc: Option<String>,
+}
+
+impl SubcommandInfo {
+    fn all_names(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.name.as_str()).chain(self.aliases.iter().map(|alias| alias.as_str()))
+    }
 }
 
 /// Collect flags and subcommands from an ArgLevelSchema.
@@ -564,6 +601,7 @@ fn subcommand_to_info(sub: &Subcommand) -> SubcommandInfo {
     SubcommandInfo {
         // cli_name is already kebab-case and respects renames
         name: sub.cli_name().to_string(),
+        aliases: sub.aliases().to_vec(),
         doc: sub.docs().summary().map(|s| s.trim().to_string()),
     }
 }
@@ -706,6 +744,51 @@ mod tests {
         assert!(
             !completions.contains("remove"),
             "completions should not show 'remove' (was renamed to 'rm')"
+        );
+    }
+
+    #[derive(Facet)]
+    #[repr(u8)]
+    #[allow(dead_code)]
+    enum CommandWithAlias {
+        #[facet(args::alias = "profiles")]
+        Profile,
+    }
+
+    #[derive(Facet)]
+    struct ArgsWithAliasedSubcommand {
+        #[facet(args::subcommand)]
+        command: Option<CommandWithAlias>,
+    }
+
+    #[test]
+    fn test_subcommand_aliases_appear_in_completions() {
+        let schema = Schema::from_shape(ArgsWithAliasedSubcommand::SHAPE).unwrap();
+
+        let bash = generate_completions_for_schema(&schema, Shell::Bash, "myapp");
+        assert!(
+            bash.contains("profile"),
+            "bash should include the canonical subcommand"
+        );
+        assert!(
+            bash.contains("profiles"),
+            "bash should include the subcommand alias"
+        );
+
+        let zsh = generate_completions_for_schema(&schema, Shell::Zsh, "myapp");
+        assert!(
+            zsh.contains("profile"),
+            "zsh should include the canonical subcommand"
+        );
+        assert!(
+            zsh.contains("profiles"),
+            "zsh should include the subcommand alias"
+        );
+
+        let fish = generate_completions_for_schema(&schema, Shell::Fish, "myapp");
+        assert!(
+            fish.contains("-a profiles"),
+            "fish should include the subcommand alias"
         );
     }
 

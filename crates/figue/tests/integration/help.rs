@@ -126,6 +126,38 @@ fn test_help_with_subcommands() {
 }
 
 #[test]
+fn test_help_shows_subcommand_aliases_with_canonical_name() {
+    #[derive(Facet, Debug)]
+    struct Cli {
+        #[facet(args::subcommand)]
+        command: Command,
+    }
+
+    #[derive(Facet, Debug)]
+    #[repr(u8)]
+    #[allow(dead_code)]
+    enum Command {
+        /// Manage profiles
+        #[facet(args::alias = "profiles")]
+        Profile,
+    }
+
+    let config = figue::HelpConfig {
+        program_name: Some("myapp".to_string()),
+        ..Default::default()
+    };
+    let help = figue::generate_help::<Cli>(&config);
+    assert!(
+        help.contains("profile"),
+        "help should show the canonical name"
+    );
+    assert!(
+        help.contains("aliases: profiles"),
+        "help should surface compatibility aliases"
+    );
+}
+
+#[test]
 fn test_help_enum_only() {
     let config = figue::HelpConfig {
         program_name: Some("git".to_string()),

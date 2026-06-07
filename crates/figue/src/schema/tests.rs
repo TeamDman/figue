@@ -459,6 +459,48 @@ struct ArgsWithConflictingAliases {
     config: ConfigWithConflictingAliases,
 }
 
+#[derive(Facet)]
+#[repr(u8)]
+enum CommandWithDuplicateAliasOnVariant {
+    #[facet(args::alias = "profiles", args::alias = "profiles")]
+    Profile,
+}
+
+#[derive(Facet)]
+struct ArgsWithDuplicateAliasOnVariant {
+    #[facet(args::subcommand)]
+    command: CommandWithDuplicateAliasOnVariant,
+}
+
+#[derive(Facet)]
+#[repr(u8)]
+enum CommandWithAliasCanonicalConflict {
+    #[facet(args::alias = "profiles")]
+    Profile,
+    Profiles,
+}
+
+#[derive(Facet)]
+struct ArgsWithAliasCanonicalConflict {
+    #[facet(args::subcommand)]
+    command: CommandWithAliasCanonicalConflict,
+}
+
+#[derive(Facet)]
+#[repr(u8)]
+enum CommandWithAliasAliasConflict {
+    #[facet(args::alias = "profiles")]
+    Profile,
+    #[facet(args::alias = "profiles")]
+    Group,
+}
+
+#[derive(Facet)]
+struct ArgsWithAliasAliasConflict {
+    #[facet(args::subcommand)]
+    command: CommandWithAliasAliasConflict,
+}
+
 #[test]
 fn test_env_alias_conflict_detected() {
     let result = Schema::from_shape(ArgsWithConflictingAliases::SHAPE);
@@ -467,6 +509,45 @@ fn test_env_alias_conflict_detected() {
     assert!(
         err.contains("DATABASE_URL") && err.contains("db_url") && err.contains("connection_string"),
         "error should mention the alias and both fields: {}",
+        err
+    );
+}
+
+#[test]
+fn test_subcommand_duplicate_alias_on_same_variant_detected() {
+    let result = Schema::from_shape(ArgsWithDuplicateAliasOnVariant::SHAPE);
+    assert!(
+        result.is_err(),
+        "should detect duplicate alias on one variant"
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("duplicate subcommand alias") && err.contains("profiles"),
+        "error should mention the duplicate alias: {}",
+        err
+    );
+}
+
+#[test]
+fn test_subcommand_alias_conflict_with_canonical_name_detected() {
+    let result = Schema::from_shape(ArgsWithAliasCanonicalConflict::SHAPE);
+    assert!(result.is_err(), "should detect alias/canonical conflict");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("duplicate subcommand name") && err.contains("profiles"),
+        "error should mention the conflicting subcommand name: {}",
+        err
+    );
+}
+
+#[test]
+fn test_subcommand_alias_conflict_with_other_alias_detected() {
+    let result = Schema::from_shape(ArgsWithAliasAliasConflict::SHAPE);
+    assert!(result.is_err(), "should detect alias/alias conflict");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("duplicate subcommand name") && err.contains("profiles"),
+        "error should mention the conflicting alias: {}",
         err
     );
 }

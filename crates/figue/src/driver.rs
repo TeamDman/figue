@@ -432,7 +432,14 @@ impl<T: Facet<'static>> Driver<T> {
                 let items: Vec<(String, Option<&str>)> = field
                     .available_subcommands
                     .iter()
-                    .map(|sub| (sub.name.clone(), sub.doc.as_deref()))
+                    .map(|sub| {
+                        let display_name = if sub.aliases.is_empty() {
+                            sub.name.clone()
+                        } else {
+                            format!("{} (aliases: {})", sub.name, sub.aliases.join(", "))
+                        };
+                        (display_name, sub.doc.as_deref())
+                    })
                     .collect();
 
                 // Find max width for alignment
@@ -1757,7 +1764,10 @@ mod tests {
         match result {
             Ok(output) => {
                 assert_eq!(output.value.command, TestCommandWithExplicitHelp::Help);
-                assert!(!output.value.builtins.help, "builtin help flag should remain false");
+                assert!(
+                    !output.value.builtins.help,
+                    "builtin help flag should remain false"
+                );
             }
             Err(e) => panic!("expected success, got error: {:?}", e),
         }

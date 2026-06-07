@@ -356,6 +356,11 @@ fn write_subcommand_help(out: &mut String, sub: &Subcommand) {
         out.push_str(summary.trim());
     }
 
+    if !sub.aliases().is_empty() {
+        out.push_str("\n            ");
+        out.push_str(&format!("aliases: {}", sub.aliases().join(", ")));
+    }
+
     out.push('\n');
 }
 

@@ -246,6 +246,31 @@ fn test_unknown_subcommand_with_suggestion() {
     assert_diag_snapshot!(err);
 }
 
+#[test]
+fn test_unknown_subcommand_suggestion_considers_aliases() {
+    #[derive(Facet, Debug)]
+    struct Cli {
+        #[facet(args::subcommand)]
+        command: Command,
+    }
+
+    #[derive(Facet, Debug)]
+    #[repr(u8)]
+    #[allow(dead_code)]
+    enum Command {
+        #[facet(args::alias = "profiles")]
+        Profile,
+    }
+
+    let err = figue::from_slice::<Cli>(&["profils"]).unwrap_err();
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("Did you mean 'profile'?"),
+        "suggestion should resolve back to the canonical subcommand: {}",
+        rendered
+    );
+}
+
 // ============================================================================
 // Test Case 7: Nested subcommands with missing argument
 // ============================================================================

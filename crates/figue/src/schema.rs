@@ -237,6 +237,9 @@ pub struct Subcommand {
     /// Derived from effective_name converted to kebab-case.
     name: String,
 
+    /// Additional long-form spellings accepted on the CLI.
+    aliases: Vec<String>,
+
     /// Effective name (respects `#[facet(rename = "...")]`).
     /// Used for deserialization with facet-format.
     effective_name: String,
@@ -562,6 +565,18 @@ impl ArgLevelSchema {
     pub fn has_subcommands(&self) -> bool {
         !self.subcommands.is_empty()
     }
+
+    /// Find a subcommand by any accepted CLI spelling.
+    pub fn find_subcommand(&self, name: &str) -> Option<&Subcommand> {
+        self.subcommands
+            .values()
+            .find(|subcommand| subcommand.matches_cli_name(name))
+    }
+
+    /// Check whether this level has a subcommand with the given CLI spelling.
+    pub fn has_subcommand_named(&self, name: &str) -> bool {
+        self.find_subcommand(name).is_some()
+    }
 }
 
 impl Docs {
@@ -647,6 +662,11 @@ impl Subcommand {
         &self.name
     }
 
+    /// Get additional accepted CLI aliases for this subcommand.
+    pub fn aliases(&self) -> &[String] {
+        &self.aliases
+    }
+
     /// Get the effective name (respects `#[facet(rename = "...")]`).
     /// This is what facet-format expects for deserialization.
     pub fn effective_name(&self) -> &str {
@@ -667,6 +687,11 @@ impl Subcommand {
     /// Get the documentation for this subcommand.
     pub fn docs(&self) -> &Docs {
         &self.docs
+    }
+
+    /// Check whether the provided CLI token selects this subcommand.
+    pub fn matches_cli_name(&self, name: &str) -> bool {
+        self.cli_name() == name || self.aliases.iter().any(|alias| alias == name)
     }
 }
 

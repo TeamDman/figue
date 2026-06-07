@@ -53,6 +53,8 @@ pub enum MissingFieldKind {
 pub struct AvailableSubcommand {
     /// CLI name (kebab-case)
     pub name: String,
+    /// Additional compatibility aliases.
+    pub aliases: Vec<String>,
     /// Doc summary if available
     pub doc: Option<String>,
 }
@@ -269,6 +271,7 @@ fn collect_missing_in_arg_level(
                 .iter()
                 .map(|(_, sub)| AvailableSubcommand {
                     name: sub.cli_name().to_string(),
+                    aliases: sub.aliases().to_vec(),
                     doc: sub.docs().summary().map(|s| s.to_string()),
                 })
                 .collect();
@@ -1520,14 +1523,8 @@ mod tests {
             ),
             "main"
         );
-        assert_eq!(
-            normalize_program_name("main-b36e7ccd11ac5f87.exe"),
-            "main"
-        );
-        assert_eq!(
-            normalize_program_name("main-b36e7ccd11ac5f87.EXE"),
-            "main"
-        );
+        assert_eq!(normalize_program_name("main-b36e7ccd11ac5f87.exe"), "main");
+        assert_eq!(normalize_program_name("main-b36e7ccd11ac5f87.EXE"), "main");
 
         // Test with just binary name and hash
         assert_eq!(normalize_program_name("main-138217976bbdb088"), "main");
