@@ -1,6 +1,7 @@
 ---
 source: crates/figue/tests/integration/help.rs
-expression: "$crate :: common :: strip_ansi(& help)"
+assertion_line: 601
+expression: "strip_ansi_escapes :: strip_str(& help)"
 ---
 main repo push
 
@@ -14,5 +15,15 @@ ARGUMENTS:
             Remote name
 
 OPTIONS:
-    -f, --force
+    -h, --help
+            Show help message and exit.
+        --html-help
+            Open HTML help in the browser and exit.
+    -V, --version
+            Show version and exit.
+        --completions <bash,zsh,fish>
+            Generate shell completions.
+        --export-jsonschemas <DIR>
+            Export JSON Schema files for all config roots.
+    -f, --[no-]force
             Force push

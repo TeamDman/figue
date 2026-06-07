@@ -184,7 +184,7 @@ pub(crate) fn coerce_types_from_shape(
                         }
                     }
                     facet_core::ScalarType::Bool => {
-                        if let Ok(b) = sourced.value.parse::<bool>() {
+                        if let Some(b) = parse_bool_like(&sourced.value) {
                             return ConfigValue::Bool(Sourced {
                                 value: b,
                                 span: sourced.span,
@@ -233,10 +233,25 @@ pub(crate) fn coerce_types_from_shape(
                 variant_fields
             };
 
-            // Coerce each field value using its field shape
+            // Coerce each field value using its field shape.
+            // Handle both regular fields and flattened fields (which expand
+            // their inner struct's fields directly into the variant).
             let mut new_fields = sourced.value.fields.clone();
             for field in effective_fields {
-                if let Some(val) = new_fields.get(field.name) {
+                if field.is_flattened() {
+                    // Expand flattened struct fields - their inner fields
+                    // appear directly in new_fields, not nested under the field name.
+                    let inner_shape = field.shape.get();
+                    if let facet_core::Type::User(facet_core::UserType::Struct(s)) = &inner_shape.ty
+                    {
+                        for inner_field in s.fields {
+                            if let Some(val) = new_fields.get(inner_field.name) {
+                                let coerced = coerce_types_from_shape(val, inner_field.shape.get());
+                                new_fields.insert(inner_field.name.to_string(), coerced);
+                            }
+                        }
+                    }
+                } else if let Some(val) = new_fields.get(field.name) {
                     let coerced = coerce_types_from_shape(val, field.shape.get());
                     new_fields.insert(field.name.to_string(), coerced);
                 }
@@ -253,6 +268,14 @@ pub(crate) fn coerce_types_from_shape(
         }
         // Other types don't need coercion
         _ => value.clone(),
+    }
+}
+
+fn parse_bool_like(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Some(true),
+        "false" | "0" | "no" | "off" => Some(false),
+        _ => None,
     }
 }
 
@@ -430,10 +453,29 @@ mod tests {
 
     #[test]
     fn test_coerce_invalid_bool_stays_string() {
-        let value = string_value("yes");
+        let value = string_value("maybe");
         let coerced = coerce_types_from_shape(&value, bool::SHAPE);
-        // "yes" is not valid for Rust's bool::parse, stays as string
         assert!(is_string(&coerced));
+    }
+
+    #[test]
+    fn test_coerce_shell_bool_values() {
+        for (input, expected) in [
+            ("True", true),
+            ("TRUE", true),
+            ("1", true),
+            ("yes", true),
+            ("on", true),
+            ("False", false),
+            ("FALSE", false),
+            ("0", false),
+            ("no", false),
+            ("off", false),
+        ] {
+            let value = string_value(input);
+            let coerced = coerce_types_from_shape(&value, bool::SHAPE);
+            assert_eq!(get_bool(&coerced), Some(expected), "input: {input}");
+        }
     }
 
     // ========================================================================

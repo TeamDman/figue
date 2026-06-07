@@ -1,5 +1,5 @@
 [package]
-name = "figue"
+name = "teamy-figue"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,12 +10,15 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "Type-safe CLI arguments, config files, and environment variables powered by Facet reflection"
-documentation = "https://docs.rs/figue"
+documentation = "https://docs.rs/teamy-figue"
 
 [package.metadata]
 
 [package.metadata."docs.rs"]
 rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+[lib]
+name = "figue"
 
 [dependencies]
 camino.workspace = true
@@ -38,6 +41,7 @@ strsim.workspace = true
 supports-color.workspace = true
 arbitrary = { workspace = true, optional = true, features = ["derive"] }
 rand = { workspace = true, optional = true }
+rand_chacha = { workspace = true, optional = true }
 
 [dev-dependencies]
 facet-format = { workspace = true, features = ["tracing"] }
@@ -54,4 +58,4 @@ default = ["rich-diagnostics"]
 rich-diagnostics = []
 doc = ["facet/doc"]
 tracing = ["facet-reflect/tracing", "facet-json/tracing", "facet-format/tracing"]
-arbitrary = ["dep:arbitrary", "dep:rand"]
+arbitrary = ["dep:arbitrary", "dep:rand", "dep:rand_chacha"]

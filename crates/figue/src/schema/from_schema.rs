@@ -4,14 +4,14 @@ use crate::{
     Attr,
     schema::{
         ArgKind, ArgLevelSchema, ArgSchema, ConfigEnumSchema, ConfigEnumVariantSchema,
-        ConfigFieldSchema, ConfigStructSchema, ConfigValueSchema, ConfigVecSchema, Docs, LeafKind,
-        LeafSchema, ScalarType, Schema, SpecialFields, Subcommand, ValueSchema,
+        ConfigFieldGroupSchema, ConfigFieldSchema, ConfigStructSchema, ConfigValueSchema,
+        ConfigVecSchema, Docs, LeafKind, LeafSchema, ScalarType, Schema, SpecialFields, Subcommand,
+        ValueSchema,
         error::{SchemaError, SchemaErrorContext},
     },
 };
 use facet::{
-    Def, EnumType, Facet, Field, ScalarType as FacetScalarType, Shape, StructKind, Type, UserType,
-    Variant,
+    Def, EnumType, Facet, Field, ScalarType as FacetScalarType, Shape, Type, UserType, Variant,
 };
 use heck::ToKebabCase;
 use indexmap::IndexMap;
@@ -30,62 +30,37 @@ impl Schema {
         };
 
         let ctx_root = SchemaErrorContext::root(shape);
-        let mut config_field: Option<(&'static Field, SchemaErrorContext)> = None;
-
-        for field in struct_type.fields {
-            let field_ctx = ctx_root.with_field(field.name);
-
-            if is_config_field(field) {
-                if let Some((_, first_ctx)) = &config_field {
-                    return Err(SchemaError::new(
-                        first_ctx.clone(),
-                        "only one field may be marked with #[facet(args::config)]",
-                    )
-                    .with_primary_label("first marked here")
-                    .with_label(field_ctx, "also marked here"));
-                }
-                config_field = Some((field, field_ctx.clone()));
-            }
-
-            if field.has_attr(Some("args"), "env_prefix") && !field.has_attr(Some("args"), "config")
-            {
-                return Err(SchemaError::new(
-                    field_ctx,
-                    format!(
-                        "field `{}` uses args::env_prefix without args::config",
-                        field.name
-                    ),
-                ));
-            }
-        }
+        let config_fields = discover_config_fields(struct_type.fields, &ctx_root, false)?;
 
         let (args, special) = arg_level_from_fields_with_special(struct_type.fields, &ctx_root)?;
 
-        let config = if let Some((field, field_ctx)) = config_field {
+        let mut configs = Vec::new();
+        for (field, field_ctx) in config_fields {
             let shape = field.shape();
+            let optional_root = matches!(shape.def, Def::Option(_));
             let config_shape = match shape.def {
                 Def::Option(opt) => opt.t,
                 _ => shape,
             };
             // Extract env_prefix from the config field's attributes
             let env_prefix = extract_env_prefix(field);
-            Some(config_struct_schema_from_shape(
+            configs.push(config_struct_schema_from_shape(
                 config_shape,
                 &field_ctx,
+                docs_from_lines(field.doc),
                 Some(field.effective_name().to_string()),
                 env_prefix,
-            )?)
-        } else {
-            None
-        };
-
+                optional_root,
+                field.is_flattened(),
+            )?);
+        }
         // Extract docs from the top-level shape
         let docs = docs_from_lines(shape.doc);
 
         Ok(Schema {
             docs,
             args,
-            config,
+            configs,
             special,
         })
     }
@@ -99,6 +74,7 @@ fn has_any_args_attr(field: &Field) -> bool {
         || field.has_attr(Some("args"), "short")
         || field.has_attr(Some("args"), "counted")
         || field.has_attr(Some("args"), "env_prefix")
+        || field.is_flattened()
 }
 
 /// Extract the env_prefix value from a field's `#[facet(args::env_prefix = "...")]` attribute.
@@ -113,6 +89,80 @@ fn extract_env_prefix(field: &Field) -> Option<String> {
     }
 }
 
+fn discover_config_fields(
+    fields: &'static [Field],
+    ctx: &SchemaErrorContext,
+    inside_subcommand: bool,
+) -> Result<Vec<(&'static Field, SchemaErrorContext)>, SchemaError> {
+    let mut config_fields = Vec::new();
+
+    for field in fields {
+        let field_ctx = ctx.with_field(field.name);
+
+        if is_config_field(field) {
+            if inside_subcommand {
+                return Err(SchemaError::new(
+                    field_ctx,
+                    "#[facet(args::config)] inside a subcommand variant is not supported",
+                )
+                .with_primary_label("place this config field on the outermost args struct"));
+            }
+
+            config_fields.push((field, field_ctx));
+            continue;
+        }
+
+        if field.has_attr(Some("args"), "env_prefix") {
+            return Err(SchemaError::new(
+                field_ctx,
+                format!(
+                    "field `{}` uses args::env_prefix without args::config",
+                    field.name
+                ),
+            ));
+        }
+
+        if field.is_flattened() {
+            let inner_shape = field.shape();
+            let Type::User(UserType::Struct(struct_type)) = inner_shape.ty else {
+                return Err(SchemaError::new(
+                    field_ctx,
+                    format!("flattened field `{}` must be a struct", field.name),
+                ));
+            };
+
+            config_fields.extend(discover_config_fields(
+                struct_type.fields,
+                &field_ctx,
+                inside_subcommand,
+            )?);
+        }
+
+        if field.has_attr(Some("args"), "subcommand") {
+            let field_shape = field.shape();
+            let (enum_shape, enum_type) = match field_shape.def {
+                Def::Option(opt) => match opt.t.ty {
+                    Type::User(UserType::Enum(enum_type)) => (opt.t, enum_type),
+                    _ => continue,
+                },
+                _ => match field_shape.ty {
+                    Type::User(UserType::Enum(enum_type)) => (field_shape, enum_type),
+                    _ => continue,
+                },
+            };
+
+            for variant in enum_type.variants {
+                let variant_ctx =
+                    SchemaErrorContext::root(enum_shape).with_variant(variant_cli_name(variant));
+                let variant_fields = variant_fields_for_schema(variant);
+                discover_config_fields(variant_fields, &variant_ctx, true)?;
+            }
+        }
+    }
+
+    Ok(config_fields)
+}
+
 /// Extract all env_alias values from a field's `#[facet(args::env_alias = "...")]` attributes.
 /// Multiple aliases can be specified by using the attribute multiple times:
 /// `#[facet(args::env_alias = "A", args::env_alias = "B")]`
@@ -124,6 +174,20 @@ fn extract_env_aliases(field: &Field) -> Vec<String> {
             // The attribute data is stored as &str directly
             if let Some(s) = field_attr.get_as::<&str>() {
                 aliases.push(s.to_string());
+            }
+        }
+    }
+    aliases
+}
+
+/// Extract all long_alias values from a field's `#[facet(args::long_alias = "...")]`
+/// attributes, normalized to kebab-case CLI flag names.
+fn extract_long_aliases(field: &Field) -> Vec<String> {
+    let mut aliases = Vec::new();
+    for field_attr in field.attributes {
+        if field_attr.ns == Some("args") && field_attr.key == "long_alias" {
+            if let Some(s) = field_attr.get_as::<&str>() {
+                aliases.push(s.to_kebab_case());
             }
         }
     }
@@ -173,6 +237,9 @@ fn extract_field_default(field: &Field) -> Option<crate::config_value::ConfigVal
             // Don't return null for types that shouldn't be null - that indicates
             // the serialization couldn't represent the default value properly
             if matches!(config_value, crate::config_value::ConfigValue::Null(_)) {
+                if let Some(value) = from_trait_vec_default(default_source, shape) {
+                    return Some(value);
+                }
                 tracing::debug!(
                     field = field.name,
                     "extract_field_default: serialized to null, skipping"
@@ -188,6 +255,9 @@ fn extract_field_default(field: &Field) -> Option<crate::config_value::ConfigVal
             }
         }
         Err(e) => {
+            if let Some(value) = from_trait_vec_default(default_source, shape) {
+                return Some(value);
+            }
             tracing::debug!(
                 field = field.name,
                 error = %e,
@@ -196,6 +266,25 @@ fn extract_field_default(field: &Field) -> Option<crate::config_value::ConfigVal
             None
         }
     }
+}
+
+fn from_trait_vec_default(
+    default_source: &facet_core::DefaultSource,
+    shape: &'static Shape,
+) -> Option<crate::config_value::ConfigValue> {
+    if !matches!(default_source, facet_core::DefaultSource::FromTrait)
+        || !matches!(shape.def, Def::List(_))
+    {
+        return None;
+    }
+
+    Some(crate::config_value::ConfigValue::Array(
+        crate::config_value::Sourced {
+            value: Vec::new(),
+            span: None,
+            provenance: Some(crate::provenance::Provenance::Default),
+        },
+    ))
 }
 
 fn docs_from_lines(lines: &'static [&'static str]) -> Docs {
@@ -286,6 +375,13 @@ fn value_schema_from_shape(
     shape: &'static Shape,
     ctx: &SchemaErrorContext,
 ) -> Result<ValueSchema, SchemaError> {
+    if shape.is_transparent()
+        && let Some(inner) = shape.inner
+        && !std::ptr::eq(inner, shape)
+    {
+        return value_schema_from_shape(inner, ctx);
+    }
+
     match shape.def {
         Def::Option(opt) => Ok(ValueSchema::Option {
             value: Box::new(value_schema_from_shape(opt.t, ctx)?),
@@ -297,7 +393,15 @@ fn value_schema_from_shape(
         }),
         _ => match &shape.ty {
             Type::User(UserType::Struct(_)) => Ok(ValueSchema::Struct {
-                fields: config_struct_schema_from_shape(shape, ctx, None, None)?,
+                fields: config_struct_schema_from_shape(
+                    shape,
+                    ctx,
+                    Docs::default(),
+                    None,
+                    None,
+                    false,
+                    false,
+                )?,
                 shape,
             }),
             _ => Ok(ValueSchema::Leaf(leaf_schema_from_shape(shape, ctx)?)),
@@ -309,6 +413,13 @@ fn config_value_schema_from_shape(
     shape: &'static Shape,
     ctx: &SchemaErrorContext,
 ) -> Result<ConfigValueSchema, SchemaError> {
+    if shape.is_transparent()
+        && let Some(inner) = shape.inner
+        && !std::ptr::eq(inner, shape)
+    {
+        return config_value_schema_from_shape(inner, ctx);
+    }
+
     match shape.def {
         Def::Option(opt) => Ok(ConfigValueSchema::Option {
             value: Box::new(config_value_schema_from_shape(opt.t, ctx)?),
@@ -319,14 +430,58 @@ fn config_value_schema_from_shape(
             shape,
         })),
         _ => match &shape.ty {
-            Type::User(UserType::Struct(_)) => Ok(ConfigValueSchema::Struct(
-                config_struct_schema_from_shape(shape, ctx, None, None)?,
-            )),
+            Type::User(UserType::Struct(_)) => {
+                Ok(ConfigValueSchema::Struct(config_struct_schema_from_shape(
+                    shape,
+                    ctx,
+                    Docs::default(),
+                    None,
+                    None,
+                    false,
+                    false,
+                )?))
+            }
             Type::User(UserType::Enum(enum_type)) => Ok(ConfigValueSchema::Enum(
                 config_enum_schema_from_shape(shape, *enum_type, ctx)?,
             )),
             _ => Ok(ConfigValueSchema::Leaf(leaf_schema_from_shape(shape, ctx)?)),
         },
+    }
+}
+
+fn value_schema_from_config_value_schema(value: &ConfigValueSchema) -> ValueSchema {
+    match value {
+        ConfigValueSchema::Leaf(leaf) => ValueSchema::Leaf(leaf.clone()),
+        ConfigValueSchema::Option { value, shape } => ValueSchema::Option {
+            value: Box::new(value_schema_from_config_value_schema(value)),
+            shape,
+        },
+        ConfigValueSchema::Vec(vec_schema) => ValueSchema::Vec {
+            element: Box::new(value_schema_from_config_value_schema(vec_schema.element())),
+            shape: vec_schema.shape(),
+        },
+        ConfigValueSchema::Struct(struct_schema) => ValueSchema::Struct {
+            fields: struct_schema.clone(),
+            shape: struct_schema.shape(),
+        },
+        ConfigValueSchema::Enum(enum_schema) => ValueSchema::Leaf(LeafSchema {
+            kind: LeafKind::Enum {
+                variants: enum_schema
+                    .variants()
+                    .keys()
+                    .map(|name| name.to_kebab_case())
+                    .collect(),
+            },
+            shape: enum_schema.shape(),
+        }),
+    }
+}
+
+fn value_schema_is_multiple(value: &ValueSchema) -> bool {
+    match value {
+        ValueSchema::Option { value, .. } => value_schema_is_multiple(value),
+        ValueSchema::Vec { .. } => true,
+        _ => false,
     }
 }
 
@@ -378,20 +533,51 @@ fn config_enum_schema_from_shape(
 fn config_struct_schema_from_shape(
     shape: &'static Shape,
     ctx: &SchemaErrorContext,
+    docs: Docs,
     field_name: Option<String>,
     env_prefix: Option<String>,
+    optional_root: bool,
+    flattened_root: bool,
 ) -> Result<ConfigStructSchema, SchemaError> {
-    config_struct_schema_from_shape_inner(shape, ctx, field_name, env_prefix, Vec::new(), false)
+    config_struct_schema_from_shape_inner(
+        shape,
+        ctx,
+        docs,
+        ConfigStructBuildOptions {
+            field_name,
+            env_prefix,
+            optional_root,
+            flattened_root,
+            path_prefix: Vec::new(),
+            parent_env_subst_all: false,
+        },
+    )
+}
+
+struct ConfigStructBuildOptions {
+    field_name: Option<String>,
+    env_prefix: Option<String>,
+    optional_root: bool,
+    flattened_root: bool,
+    path_prefix: Vec<String>,
+    parent_env_subst_all: bool,
 }
 
 fn config_struct_schema_from_shape_inner(
     shape: &'static Shape,
     ctx: &SchemaErrorContext,
-    field_name: Option<String>,
-    env_prefix: Option<String>,
-    path_prefix: Vec<String>,
-    parent_env_subst_all: bool,
+    docs: Docs,
+    options: ConfigStructBuildOptions,
 ) -> Result<ConfigStructSchema, SchemaError> {
+    let ConfigStructBuildOptions {
+        field_name,
+        env_prefix,
+        optional_root,
+        flattened_root,
+        path_prefix,
+        parent_env_subst_all,
+    } = options;
+
     let struct_type = match &shape.ty {
         Type::User(UserType::Struct(s)) => *s,
         _ => {
@@ -410,6 +596,7 @@ fn config_struct_schema_from_shape_inner(
     let apply_env_subst_to_children = parent_env_subst_all || this_env_subst_all;
 
     let mut fields_map: IndexMap<String, ConfigFieldSchema, RandomState> = IndexMap::default();
+    let mut field_groups = Vec::new();
 
     for field in struct_type.fields {
         let field_ctx = ctx.with_field(field.name);
@@ -437,11 +624,23 @@ fn config_struct_schema_from_shape_inner(
             let inner = config_struct_schema_from_shape_inner(
                 inner_shape,
                 &field_ctx,
-                None,
-                None,
-                new_prefix,
-                apply_env_subst_to_children,
+                Docs::default(),
+                ConfigStructBuildOptions {
+                    field_name: None,
+                    env_prefix: None,
+                    optional_root: false,
+                    flattened_root: false,
+                    path_prefix: new_prefix,
+                    parent_env_subst_all: apply_env_subst_to_children,
+                },
             )?;
+
+            field_groups.push(ConfigFieldGroupSchema {
+                name: field.effective_name().to_string(),
+                docs: docs_from_lines(field.doc),
+                fields: inner.fields.clone(),
+                field_groups: inner.field_groups.clone(),
+            });
 
             // Merge the inner fields into our fields (checking for conflicts)
             for (name, field_schema) in inner.fields {
@@ -492,10 +691,14 @@ fn config_struct_schema_from_shape_inner(
     check_env_alias_conflicts(&fields_map, ctx)?;
 
     Ok(ConfigStructSchema {
+        docs,
         field_name,
         env_prefix,
+        optional_root,
+        flattened_root,
         shape,
         fields: fields_map,
+        field_groups,
     })
 }
 
@@ -540,6 +743,53 @@ fn short_from_field(field: &Field) -> Option<char> {
         })
 }
 
+fn short_from_variant(variant: &Variant) -> Option<char> {
+    variant
+        .get_attr(Some("args"), "short")
+        .and_then(|attr| attr.get_as::<Attr>())
+        .and_then(|attr| {
+            if let Attr::Short(c) = attr {
+                c.or_else(|| variant.effective_name().chars().next())
+            } else {
+                None
+            }
+        })
+}
+
+fn check_long_alias_conflicts(
+    seen_long: &mut HashMap<String, SchemaErrorContext>,
+    aliases: &[String],
+    field_ctx: &SchemaErrorContext,
+    field_name: &str,
+) -> Result<(), SchemaError> {
+    let mut seen_local: HashMap<&str, ()> = HashMap::new();
+
+    for alias in aliases {
+        if seen_local.insert(alias.as_str(), ()).is_some() {
+            return Err(SchemaError::new(
+                field_ctx.clone(),
+                format!("duplicate long alias `--{alias}` on `{field_name}`"),
+            )
+            .with_primary_label("alias repeated here"));
+        }
+
+        if let Some(existing_ctx) = seen_long.get(alias) {
+            return Err(SchemaError::new(
+                existing_ctx.clone(),
+                format!("duplicate flag `--{alias}`"),
+            )
+            .with_primary_label(format!("`--{alias}` first defined here"))
+            .with_label(field_ctx.clone(), "alias defined again here"));
+        }
+    }
+
+    for alias in aliases {
+        seen_long.insert(alias.clone(), field_ctx.clone());
+    }
+
+    Ok(())
+}
+
 fn variant_fields_for_schema(variant: &Variant) -> &'static [Field] {
     let fields = variant.data.fields;
     if is_flattened_tuple_variant(variant) {
@@ -555,12 +805,9 @@ fn variant_fields_for_schema(variant: &Variant) -> &'static [Field] {
 /// E.g., `Bench(BenchArgs)` where `BenchArgs` is a struct.
 fn is_flattened_tuple_variant(variant: &Variant) -> bool {
     let fields = variant.data.fields;
-    if variant.data.kind == StructKind::TupleStruct && fields.len() == 1 {
-        let inner_shape = fields[0].shape();
-        matches!(inner_shape.ty, Type::User(UserType::Struct(_)))
-    } else {
-        false
-    }
+    fields.len() == 1
+        && fields[0].name.chars().all(|c| c.is_ascii_digit())
+        && matches!(fields[0].shape().ty, Type::User(UserType::Struct(_)))
 }
 
 fn arg_level_from_fields(
@@ -592,15 +839,73 @@ fn arg_level_from_fields_with_prefix(
     let mut seen_long: HashMap<String, SchemaErrorContext> = HashMap::new();
     let mut seen_short: HashMap<char, SchemaErrorContext> = HashMap::new();
     let mut seen_subcommands: HashMap<String, SchemaErrorContext> = HashMap::new();
+    let mut seen_subcommand_short: HashMap<char, SchemaErrorContext> = HashMap::new();
 
     let mut first_subcommand_field: Option<SchemaErrorContext> = None;
 
     for field in fields {
+        let field_ctx = ctx.with_field(field.name);
+
         if is_config_field(field) {
+            if field.is_flattened() {
+                let shape = field.shape();
+                let optional_root = matches!(shape.def, Def::Option(_));
+                let config_shape = match shape.def {
+                    Def::Option(opt) => opt.t,
+                    _ => shape,
+                };
+                let config_field_name = field.effective_name().to_string();
+                let config_schema = config_struct_schema_from_shape(
+                    config_shape,
+                    &field_ctx,
+                    docs_from_lines(field.doc),
+                    Some(config_field_name.clone()),
+                    extract_env_prefix(field),
+                    optional_root,
+                    true,
+                )?;
+
+                for (name, config_field_schema) in config_schema.fields() {
+                    let long = name.to_kebab_case();
+                    if let Some(existing_ctx) = seen_long.get(&long) {
+                        return Err(SchemaError::new(
+                            existing_ctx.clone(),
+                            format!("duplicate flag `--{long}` (from flattened config root)"),
+                        )
+                        .with_primary_label(format!("`--{long}` first defined here"))
+                        .with_label(field_ctx.clone(), "flattened config root defined here"));
+                    }
+                    if args.contains_key(name) {
+                        return Err(SchemaError::new(
+                            field_ctx.clone(),
+                            format!("duplicate argument `{name}` (from flattened config root)"),
+                        )
+                        .with_primary_label("flattened config root defined here"));
+                    }
+                    seen_long.insert(long, field_ctx.clone());
+
+                    let value = value_schema_from_config_value_schema(config_field_schema.value());
+                    let arg = ArgSchema {
+                        name: name.clone(),
+                        long_aliases: Vec::new(),
+                        insertion_path: vec![config_field_name.clone(), name.clone()],
+                        docs: config_field_schema.docs().clone(),
+                        kind: ArgKind::Named {
+                            short: None,
+                            counted: false,
+                        },
+                        multiple: value_schema_is_multiple(&value),
+                        value,
+                        label: None,
+                        required: false,
+                        default: None,
+                    };
+
+                    args.insert(name.clone(), arg);
+                }
+            }
             continue;
         }
-
-        let field_ctx = ctx.with_field(field.name);
 
         // Handle flattened fields - recurse into the inner struct
         if field.is_flattened() {
@@ -627,24 +932,32 @@ fn arg_level_from_fields_with_prefix(
             if inner_special.help.is_some() {
                 special.help = inner_special.help;
             }
+            if inner_special.html_help.is_some() {
+                special.html_help = inner_special.html_help;
+            }
             if inner_special.version.is_some() {
                 special.version = inner_special.version;
             }
             if inner_special.completions.is_some() {
                 special.completions = inner_special.completions;
             }
+            if inner_special.export_jsonschemas.is_some() {
+                special.export_jsonschemas = inner_special.export_jsonschemas;
+            }
 
             // Merge the inner args into our args (checking for conflicts)
             for (name, arg) in inner.args {
-                if let Some(existing_ctx) = seen_long.get(&name) {
-                    return Err(SchemaError::new(
-                        existing_ctx.clone(),
-                        format!("duplicate flag `--{}` (from flattened field)", name),
-                    )
-                    .with_primary_label("first defined here")
-                    .with_label(field_ctx.clone(), "flattened here"));
+                for long_name in arg.long_flag_names() {
+                    if let Some(existing_ctx) = seen_long.get(&long_name) {
+                        return Err(SchemaError::new(
+                            existing_ctx.clone(),
+                            format!("duplicate flag `--{long_name}` (from flattened field)"),
+                        )
+                        .with_primary_label("first defined here")
+                        .with_label(field_ctx.clone(), "flattened here"));
+                    }
+                    seen_long.insert(long_name, field_ctx.clone());
                 }
-                seen_long.insert(name.clone(), field_ctx.clone());
 
                 if let ArgKind::Named { short: Some(c), .. } = &arg.kind {
                     if let Some(existing_ctx) = seen_short.get(c) {
@@ -778,16 +1091,40 @@ fn arg_level_from_fields_with_prefix(
                 // effective_name respects #[facet(rename = "...")], used for deserialization
                 let effective_name = variant.effective_name().to_string();
                 let docs = docs_from_lines(variant.doc);
+                let short = short_from_variant(variant);
                 let variant_fields = variant_fields_for_schema(variant);
                 let variant_ctx =
                     SchemaErrorContext::root(enum_shape).with_variant(cli_name.clone());
                 let args_schema = arg_level_from_fields(variant_fields, &variant_ctx)?;
                 let is_flattened_tuple = is_flattened_tuple_variant(variant);
 
+                if let Some(short) = short {
+                    if let Some(existing_ctx) = seen_subcommand_short.get(&short) {
+                        return Err(SchemaError::new(
+                            existing_ctx.clone(),
+                            format!("duplicate subcommand short alias `{short}`"),
+                        )
+                        .with_primary_label(format!("`{short}` first defined here"))
+                        .with_label(variant_ctx.clone(), "defined again here"));
+                    }
+                    if let Some(existing_ctx) = seen_subcommands.get(&short.to_string()) {
+                        return Err(SchemaError::new(
+                            existing_ctx.clone(),
+                            format!(
+                                "subcommand short alias `{short}` conflicts with existing subcommand name"
+                            ),
+                        )
+                        .with_primary_label("conflicting name defined here")
+                        .with_label(variant_ctx.clone(), "conflicting short alias defined here"));
+                    }
+                    seen_subcommand_short.insert(short, variant_ctx.clone());
+                }
+
                 let sub = Subcommand {
                     name: cli_name.clone(),
                     effective_name: effective_name.clone(),
                     docs,
+                    short,
                     args: args_schema,
                     is_flattened_tuple,
                     shape: enum_shape,
@@ -814,6 +1151,17 @@ fn arg_level_from_fields_with_prefix(
             None
         };
         let counted = field.has_attr(Some("args"), "counted");
+        let long_aliases = extract_long_aliases(field);
+
+        if !long_aliases.is_empty() && (is_positional || is_subcommand || is_config_field(field)) {
+            return Err(SchemaError::new(
+                field_ctx,
+                format!(
+                    "field `{}` uses args::long_alias on a non-named argument",
+                    field.name
+                ),
+            ));
+        }
 
         let kind = if is_positional {
             ArgKind::Positional
@@ -858,6 +1206,7 @@ fn arg_level_from_fields_with_prefix(
                 .with_label(field_ctx.clone(), "defined again here"));
             }
             seen_long.insert(long.clone(), field_ctx.clone());
+            check_long_alias_conflicts(&mut seen_long, &long_aliases, &field_ctx, field.name)?;
 
             if let Some(c) = short {
                 if let Some(existing_ctx) = seen_short.get(&c) {
@@ -881,9 +1230,14 @@ fn arg_level_from_fields_with_prefix(
         let mut field_path = path_prefix.clone();
         field_path.push(effective_name.clone());
 
-        // Detect special fields by ATTRIBUTE, not field name
+        // Detect special fields by ATTRIBUTE, except for built-in html_help,
+        // which is recognized by its field name to keep FigueBuiltins usable
+        // without introducing another public attribute.
         if field.has_attr(Some("args"), "help") {
             special.help = Some(field_path.clone());
+        }
+        if field.has_attr(Some("args"), "html_help") || field.name == "html_help" {
+            special.html_help = Some(field_path.clone());
         }
         if field.has_attr(Some("args"), "version") {
             special.version = Some(field_path.clone());
@@ -891,9 +1245,14 @@ fn arg_level_from_fields_with_prefix(
         if field.has_attr(Some("args"), "completions") {
             special.completions = Some(field_path.clone());
         }
+        if field.has_attr(Some("args"), "export_jsonschemas") {
+            special.export_jsonschemas = Some(field_path.clone());
+        }
 
         let arg = ArgSchema {
             name: effective_name.clone(),
+            long_aliases,
+            insertion_path: vec![effective_name.clone()],
             docs,
             kind,
             value,
@@ -902,6 +1261,14 @@ fn arg_level_from_fields_with_prefix(
             multiple,
             default,
         };
+
+        if args.contains_key(&effective_name) {
+            return Err(SchemaError::new(
+                field_ctx.clone(),
+                format!("duplicate argument `{effective_name}`"),
+            )
+            .with_primary_label("defined again here"));
+        }
 
         args.insert(effective_name, arg);
     }

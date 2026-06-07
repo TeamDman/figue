@@ -128,6 +128,86 @@ struct ConflictingShortFlags {
 }
 
 #[derive(Facet)]
+struct ArgsWithLongAlias {
+    #[facet(
+        args::named,
+        rename = "drive",
+        args::long_alias = "drive-letter-pattern"
+    )]
+    drive_letter_pattern: bool,
+}
+
+#[derive(Facet)]
+struct ConflictingLongAliasAndCanonical {
+    #[facet(args::named, rename = "drive", args::long_alias = "port")]
+    drive: bool,
+    #[facet(args::named)]
+    port: bool,
+}
+
+#[derive(Facet)]
+struct DuplicateLongAliasOnField {
+    #[facet(
+        args::named,
+        args::long_alias = "drive-letter-pattern",
+        args::long_alias = "drive-letter-pattern"
+    )]
+    drive: bool,
+}
+
+#[derive(Facet)]
+struct ConflictingLongAliases {
+    #[facet(args::named, args::long_alias = "drive-letter-pattern")]
+    drive: bool,
+    #[facet(args::named, args::long_alias = "drive-letter-pattern")]
+    letter: bool,
+}
+
+#[derive(Facet)]
+#[repr(u8)]
+enum SubcommandWithShort {
+    #[facet(args::short = 'd')]
+    Daemon,
+    Doctor,
+}
+
+#[derive(Facet)]
+struct ArgsWithSubcommandShort {
+    #[facet(args::subcommand)]
+    command: SubcommandWithShort,
+}
+
+#[derive(Facet)]
+#[repr(u8)]
+enum SubcommandShortConflictsWithFlagCommand {
+    #[facet(args::short = 'd')]
+    Daemon,
+}
+
+#[derive(Facet)]
+struct SubcommandShortConflictsWithFlag {
+    #[facet(args::named, args::short = 'd')]
+    debug: bool,
+    #[facet(args::subcommand)]
+    command: SubcommandShortConflictsWithFlagCommand,
+}
+
+#[derive(Facet)]
+#[repr(u8)]
+enum SubcommandShortConflictsCommand {
+    #[facet(args::short = 'd')]
+    Daemon,
+    #[facet(args::short = 'd')]
+    Doctor,
+}
+
+#[derive(Facet)]
+struct SubcommandShortConflicts {
+    #[facet(args::subcommand)]
+    command: SubcommandShortConflictsCommand,
+}
+
+#[derive(Facet)]
 struct BadConfigField {
     #[facet(args::config)]
     config: String,
@@ -187,6 +267,79 @@ fn snapshot_schema_conflicting_long_flags() {
 #[test]
 fn snapshot_schema_conflicting_short_flags() {
     assert_schema_snapshot!(Schema::from_shape(ConflictingShortFlags::SHAPE));
+}
+
+#[test]
+fn test_schema_long_aliases_are_stored() {
+    let schema = Schema::from_shape(ArgsWithLongAlias::SHAPE).unwrap();
+    let arg = schema
+        .args()
+        .args()
+        .get("drive")
+        .expect("flag should be found")
+        .1;
+    assert_eq!(arg.name(), "drive");
+    assert_eq!(arg.long_aliases(), &["drive-letter-pattern".to_string()]);
+    assert!(arg.matches_long_flag("drive"));
+    assert!(arg.matches_long_flag("drive-letter-pattern"));
+}
+
+#[test]
+fn test_schema_long_alias_conflicts_with_canonical_flag() {
+    let result = Schema::from_shape(ConflictingLongAliasAndCanonical::SHAPE);
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("duplicate flag `--port`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn test_schema_duplicate_long_alias_on_same_field_is_rejected() {
+    let result = Schema::from_shape(DuplicateLongAliasOnField::SHAPE);
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("duplicate long alias `--drive-letter-pattern`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn test_schema_duplicate_long_alias_across_fields_is_rejected() {
+    let result = Schema::from_shape(ConflictingLongAliases::SHAPE);
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("duplicate flag `--drive-letter-pattern`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn test_schema_subcommand_short_stored() {
+    let schema = Schema::from_shape(ArgsWithSubcommandShort::SHAPE).unwrap();
+    let daemon = schema
+        .args()
+        .subcommands()
+        .values()
+        .find(|sub| sub.cli_name() == "daemon")
+        .unwrap();
+    assert_eq!(daemon.short(), Some('d'));
+}
+
+#[test]
+fn test_schema_subcommand_short_conflicts_with_flag() {
+    Schema::from_shape(SubcommandShortConflictsWithFlag::SHAPE)
+        .expect("subcommand short alias 'd' should not conflict with flag short '-d'");
+}
+
+#[test]
+fn test_schema_subcommand_short_conflicts_with_subcommand_short() {
+    let result = Schema::from_shape(SubcommandShortConflicts::SHAPE);
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("duplicate subcommand short alias `d`"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
@@ -318,7 +471,7 @@ struct ArgsWithFlattenedConfig {
 #[test]
 fn test_config_flatten_schema_builds() {
     let schema = Schema::from_shape(ArgsWithFlattenedConfig::SHAPE).expect("schema should build");
-    let config = schema.config().expect("should have config");
+    let config = schema.configs().first().expect("should have config");
     let fields = config.fields();
 
     // Should have 3 fields: name, log_level, debug (flattened from common)
@@ -362,7 +515,7 @@ struct ArgsWithNestedFlattenConfig {
 fn test_config_nested_flatten_schema_builds() {
     let schema =
         Schema::from_shape(ArgsWithNestedFlattenConfig::SHAPE).expect("schema should build");
-    let config = schema.config().expect("should have config");
+    let config = schema.configs().first().expect("should have config");
     let fields = config.fields();
 
     // Should have 5 fields: app_name + log_level, debug (from common) + host, port (from database)
@@ -429,6 +582,16 @@ struct ArgsWithUnflattenedStruct {
     options: NestedOptions, // ERROR: struct fields must use flatten
 }
 
+#[derive(Facet)]
+#[facet(transparent)]
+struct TransparentPattern(String);
+
+#[derive(Facet)]
+struct ArgsWithTransparentNewtype {
+    #[facet(args::named)]
+    pattern: TransparentPattern,
+}
+
 #[test]
 fn test_struct_field_without_flatten_is_error() {
     let result = Schema::from_shape(ArgsWithUnflattenedStruct::SHAPE);
@@ -438,6 +601,17 @@ fn test_struct_field_without_flatten_is_error() {
         err.contains("flatten"),
         "error should mention flatten: {}",
         err
+    );
+}
+
+#[test]
+fn test_transparent_newtype_arg_is_allowed() {
+    let schema = Schema::from_shape(ArgsWithTransparentNewtype::SHAPE)
+        .expect("transparent newtype args should be treated like their inner leaf type");
+
+    assert!(
+        schema.args().args.contains_key("pattern"),
+        "transparent newtype field should appear as a regular named arg"
     );
 }
 

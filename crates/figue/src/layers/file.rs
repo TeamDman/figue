@@ -29,11 +29,12 @@ use std::sync::Arc;
 use std::vec::Vec;
 
 use camino::{Utf8Path, Utf8PathBuf};
+use indexmap::IndexMap;
 
 use crate::config_format::{ConfigFormat, ConfigFormatError, JsonFormat};
-use crate::config_value::ConfigValue;
+use crate::config_value::{ConfigValue, Sourced};
 use crate::driver::{Diagnostic, LayerOutput, Severity};
-use crate::provenance::{ConfigFile, FilePathStatus, FileResolution};
+use crate::provenance::{ConfigFile, FilePathStatus, FileResolution, Provenance};
 use crate::schema::Schema;
 use crate::value_builder::ValueBuilder;
 
@@ -127,8 +128,11 @@ impl FormatRegistry {
 
 /// Configuration for config file parsing.
 pub struct FileConfig {
-    /// Explicit path provided via CLI (e.g., --config path.json).
+    /// Explicit global config path provided through the builder API.
     pub explicit_path: Option<Utf8PathBuf>,
+
+    /// Explicit paths provided via CLI, keyed by config root field name.
+    pub explicit_paths_by_root: IndexMap<String, Utf8PathBuf>,
 
     /// Default paths to check if no explicit path is provided.
     pub default_paths: Vec<Utf8PathBuf>,
@@ -149,6 +153,7 @@ impl Default for FileConfig {
     fn default() -> Self {
         Self {
             explicit_path: None,
+            explicit_paths_by_root: IndexMap::default(),
             default_paths: Vec::new(),
             registry: FormatRegistry::with_defaults(),
             strict: false,
@@ -232,6 +237,8 @@ struct FileParseContext<'a> {
     config: &'a FileConfig,
     /// Parsed config value (if successful)
     value: Option<ConfigValue>,
+    /// Parsed config values that were explicitly targeted at config roots.
+    targeted_values: IndexMap<String, ConfigValue>,
     /// Diagnostics collected before ValueBuilder takes over
     early_diagnostics: Vec<Diagnostic>,
     /// File resolution tracking
@@ -244,12 +251,18 @@ impl<'a> FileParseContext<'a> {
             schema,
             config,
             value: None,
+            targeted_values: IndexMap::default(),
             early_diagnostics: Vec::new(),
             resolution: FileResolution::new(),
         }
     }
 
     fn parse(&mut self) {
+        if self.config.inline_content.is_none() && !self.config.explicit_paths_by_root.is_empty() {
+            self.parse_targeted_paths();
+            return;
+        }
+
         // Check for inline content first (used for testing)
         let (path, contents) = if let Some((content, filename)) = &self.config.inline_content {
             let path = Utf8PathBuf::from(filename);
@@ -284,6 +297,39 @@ impl<'a> FileParseContext<'a> {
         };
 
         self.value = Some(parsed);
+    }
+
+    fn parse_targeted_paths(&mut self) {
+        self.resolution
+            .mark_defaults_not_tried(&self.config.default_paths);
+
+        for (field_name, path) in &self.config.explicit_paths_by_root {
+            let exists = path.exists();
+            self.resolution.add_explicit(path.clone(), exists);
+
+            if !exists {
+                self.emit_error(format!("config file not found: {}", path));
+                continue;
+            }
+
+            let contents = match std::fs::read_to_string(path) {
+                Ok(c) => c,
+                Err(e) => {
+                    self.emit_error(format!("failed to read {}: {}", path, e));
+                    continue;
+                }
+            };
+
+            let parsed = match self.config.registry.parse_file(path, &contents) {
+                Ok(v) => v,
+                Err(e) => {
+                    self.emit_error(format!("failed to parse {}: {}", path, e));
+                    continue;
+                }
+            };
+
+            self.targeted_values.insert(field_name.clone(), parsed);
+        }
     }
 
     /// Resolve which file path to use.
@@ -333,27 +379,17 @@ impl<'a> FileParseContext<'a> {
     }
 
     fn into_result(self) -> FileParseResult {
-        // If we have a config schema and a parsed value, use ValueBuilder
+        // If we have config schemas and a parsed value, use ValueBuilder
         // to validate and collect unused keys
-        let output = if let Some(config_schema) = self.schema.config() {
-            if let Some(ref parsed) = self.value {
-                // Create a ValueBuilder and import the parsed tree
-                let mut builder = ValueBuilder::new(config_schema);
-                builder.import_tree(parsed);
-
-                // Unknown keys are tracked in unused_keys by the builder.
-                // In strict mode, they'll be reported by the driver alongside the config dump.
-
-                // Get the output from the builder
-                let mut output =
-                    builder.into_output_with_value(self.value.clone(), config_schema.field_name());
-
-                // Prepend any early diagnostics (file read errors, etc.)
-                let mut all_diagnostics = self.early_diagnostics;
-                all_diagnostics.append(&mut output.diagnostics);
-                output.diagnostics = all_diagnostics;
-
-                output
+        let output = if !self.schema.configs().is_empty() {
+            if !self.targeted_values.is_empty() {
+                Self::targeted_config_output(
+                    self.schema,
+                    &self.targeted_values,
+                    self.early_diagnostics,
+                )
+            } else if let Some(ref parsed) = self.value {
+                Self::multi_config_output(self.schema, parsed, self.early_diagnostics)
             } else {
                 // No parsed value - return early diagnostics only
                 LayerOutput {
@@ -361,7 +397,8 @@ impl<'a> FileParseContext<'a> {
                     unused_keys: Vec::new(),
                     diagnostics: self.early_diagnostics,
                     source_text: None,
-                    config_file_path: None,
+                    config_file_paths: IndexMap::default(),
+                    help_list_mode: None,
                 }
             }
         } else {
@@ -371,7 +408,8 @@ impl<'a> FileParseContext<'a> {
                 unused_keys: Vec::new(),
                 diagnostics: self.early_diagnostics,
                 source_text: None,
-                config_file_path: None,
+                config_file_paths: IndexMap::default(),
+                help_list_mode: None,
             }
         };
 
@@ -379,6 +417,147 @@ impl<'a> FileParseContext<'a> {
             output,
             resolution: self.resolution,
         }
+    }
+
+    fn multi_config_output(
+        schema: &Schema,
+        parsed: &ConfigValue,
+        early_diagnostics: Vec<Diagnostic>,
+    ) -> LayerOutput {
+        let mut root = IndexMap::default();
+        let mut unused_keys = Vec::new();
+        let mut diagnostics = early_diagnostics;
+
+        let ConfigValue::Object(parsed_obj) = parsed else {
+            diagnostics.push(Diagnostic {
+                message: "config file with multiple config roots must be an object".to_string(),
+                label: None,
+                path: None,
+                span: None,
+                severity: Severity::Error,
+            });
+
+            return LayerOutput {
+                value: None,
+                unused_keys,
+                diagnostics,
+                source_text: None,
+                config_file_paths: IndexMap::default(),
+                help_list_mode: None,
+            };
+        };
+
+        for (key, value) in &parsed_obj.value {
+            let known_root = schema
+                .configs()
+                .iter()
+                .any(|config_schema| config_schema.field_name() == Some(key.as_str()));
+            if !known_root {
+                unused_keys.push(crate::driver::UnusedKey {
+                    key: vec![key.clone()],
+                    provenance: get_provenance(value)
+                        .cloned()
+                        .unwrap_or(Provenance::Default),
+                });
+            }
+        }
+
+        for config_schema in schema.configs() {
+            let Some(field_name) = config_schema.field_name() else {
+                continue;
+            };
+
+            let Some(config_value) = parsed_obj.value.get(field_name) else {
+                continue;
+            };
+
+            let mut builder = ValueBuilder::new(config_schema);
+            builder.import_tree(config_value);
+            let mut builder_output =
+                builder.into_output_with_value(Some(config_value.clone()), None);
+
+            if let Some(value) = builder_output.value {
+                root.insert(field_name.to_string(), value);
+            }
+
+            for unused_key in &mut builder_output.unused_keys {
+                unused_key.key.insert(0, field_name.to_string());
+            }
+            unused_keys.extend(builder_output.unused_keys);
+            diagnostics.extend(builder_output.diagnostics);
+        }
+
+        LayerOutput {
+            value: Some(ConfigValue::Object(Sourced::new(root))),
+            unused_keys,
+            diagnostics,
+            source_text: None,
+            config_file_paths: IndexMap::default(),
+            help_list_mode: None,
+        }
+    }
+
+    fn targeted_config_output(
+        schema: &Schema,
+        targeted_values: &IndexMap<String, ConfigValue>,
+        early_diagnostics: Vec<Diagnostic>,
+    ) -> LayerOutput {
+        let mut root = IndexMap::default();
+        let mut unused_keys = Vec::new();
+        let mut diagnostics = early_diagnostics;
+
+        for (field_name, config_value) in targeted_values {
+            let Some(config_schema) = schema
+                .configs()
+                .iter()
+                .find(|config_schema| config_schema.field_name() == Some(field_name.as_str()))
+            else {
+                unused_keys.push(crate::driver::UnusedKey {
+                    key: vec![field_name.clone()],
+                    provenance: get_provenance(config_value)
+                        .cloned()
+                        .unwrap_or(Provenance::Default),
+                });
+                continue;
+            };
+
+            let mut builder = ValueBuilder::new(config_schema);
+            builder.import_tree(config_value);
+            let mut builder_output =
+                builder.into_output_with_value(Some(config_value.clone()), None);
+
+            if let Some(value) = builder_output.value {
+                root.insert(field_name.clone(), value);
+            }
+
+            for unused_key in &mut builder_output.unused_keys {
+                unused_key.key.insert(0, field_name.clone());
+            }
+            unused_keys.extend(builder_output.unused_keys);
+            diagnostics.extend(builder_output.diagnostics);
+        }
+
+        LayerOutput {
+            value: Some(ConfigValue::Object(Sourced::new(root))),
+            unused_keys,
+            diagnostics,
+            source_text: None,
+            config_file_paths: IndexMap::default(),
+            help_list_mode: None,
+        }
+    }
+}
+
+fn get_provenance(value: &ConfigValue) -> Option<&Provenance> {
+    match value {
+        ConfigValue::Null(s) => s.provenance.as_ref(),
+        ConfigValue::Bool(s) => s.provenance.as_ref(),
+        ConfigValue::Integer(s) => s.provenance.as_ref(),
+        ConfigValue::Float(s) => s.provenance.as_ref(),
+        ConfigValue::String(s) => s.provenance.as_ref(),
+        ConfigValue::Array(s) => s.provenance.as_ref(),
+        ConfigValue::Object(s) => s.provenance.as_ref(),
+        ConfigValue::Enum(s) => s.provenance.as_ref(),
     }
 }
 
@@ -485,7 +664,7 @@ mod tests {
 
     #[test]
     fn test_parse_simple_json() {
-        let file = create_temp_json(r#"{"port": 8080, "host": "localhost"}"#);
+        let file = create_temp_json(r#"{"config": {"port": 8080, "host": "localhost"}}"#);
         let path = Utf8PathBuf::from_path_buf(file.path().to_path_buf()).unwrap();
 
         let schema = Schema::from_shape(ArgsWithConfig::SHAPE).unwrap();
@@ -507,7 +686,7 @@ mod tests {
     #[test]
     fn test_parse_nested_json() {
         let file = create_temp_json(
-            r#"{"port": 8080, "smtp": {"host": "mail.example.com", "connection_timeout": 30}}"#,
+            r#"{"settings": {"port": 8080, "smtp": {"host": "mail.example.com", "connection_timeout": 30}}}"#,
         );
         let path = Utf8PathBuf::from_path_buf(file.path().to_path_buf()).unwrap();
 
@@ -562,7 +741,7 @@ mod tests {
 
     #[test]
     fn test_default_paths_tried_in_order() {
-        let file = create_temp_json(r#"{"port": 9000, "host": "default"}"#);
+        let file = create_temp_json(r#"{"config": {"port": 9000, "host": "default"}}"#);
         let path = Utf8PathBuf::from_path_buf(file.path().to_path_buf()).unwrap();
 
         let schema = Schema::from_shape(ArgsWithConfig::SHAPE).unwrap();
@@ -595,7 +774,9 @@ mod tests {
 
     #[test]
     fn test_unknown_key_tracked() {
-        let file = create_temp_json(r#"{"port": 8080, "host": "localhost", "unknown_field": 123}"#);
+        let file = create_temp_json(
+            r#"{"config": {"port": 8080, "host": "localhost", "unknown_field": 123}}"#,
+        );
         let path = Utf8PathBuf::from_path_buf(file.path().to_path_buf()).unwrap();
 
         let schema = Schema::from_shape(ArgsWithConfig::SHAPE).unwrap();
@@ -621,7 +802,9 @@ mod tests {
     fn test_unknown_key_tracked_in_strict_mode() {
         // In strict mode, unknown keys are tracked in unused_keys.
         // The driver will report them alongside the config dump (not as early errors).
-        let file = create_temp_json(r#"{"port": 8080, "host": "localhost", "unknown_field": 123}"#);
+        let file = create_temp_json(
+            r#"{"config": {"port": 8080, "host": "localhost", "unknown_field": 123}}"#,
+        );
         let path = Utf8PathBuf::from_path_buf(file.path().to_path_buf()).unwrap();
 
         let schema = Schema::from_shape(ArgsWithConfig::SHAPE).unwrap();
@@ -639,7 +822,7 @@ mod tests {
                 .output
                 .unused_keys
                 .iter()
-                .any(|uk| uk.key.join(".") == "unknown_field"),
+                .any(|uk| uk.key.join(".") == "config.unknown_field"),
             "unused_keys should contain 'unknown_field': {:?}",
             result.output.unused_keys
         );
@@ -664,7 +847,7 @@ mod tests {
 
     #[test]
     fn test_file_provenance() {
-        let file = create_temp_json(r#"{"port": 8080, "host": "localhost"}"#);
+        let file = create_temp_json(r#"{"config": {"port": 8080, "host": "localhost"}}"#);
         let path = Utf8PathBuf::from_path_buf(file.path().to_path_buf()).unwrap();
 
         let schema = Schema::from_shape(ArgsWithConfig::SHAPE).unwrap();
@@ -738,7 +921,9 @@ mod tests {
     fn test_flatten_config_parses_flat_json() {
         // JSON file has FLAT structure - flattened fields appear at the current level
         // NOT nested under "common"
-        let file = create_temp_json(r#"{"name": "myapp", "log_level": "debug", "debug": true}"#);
+        let file = create_temp_json(
+            r#"{"config": {"name": "myapp", "log_level": "debug", "debug": true}}"#,
+        );
         let path = Utf8PathBuf::from_path_buf(file.path().to_path_buf()).unwrap();
 
         let schema = Schema::from_shape(ArgsWithFlattenedConfig::SHAPE).unwrap();
@@ -776,7 +961,7 @@ mod tests {
         // JSON with nested "common" should be rejected - "common" is not a valid key
         // because it's flattened (its fields are hoisted to the parent level)
         let file = create_temp_json(
-            r#"{"name": "myapp", "common": {"log_level": "debug", "debug": true}}"#,
+            r#"{"config": {"name": "myapp", "common": {"log_level": "debug", "debug": true}}}"#,
         );
         let path = Utf8PathBuf::from_path_buf(file.path().to_path_buf()).unwrap();
 
@@ -835,11 +1020,13 @@ mod tests {
         // flattened common and database. So ALL fields appear at the top level.
         let file = create_temp_json(
             r#"{
-                "app_name": "super-app",
-                "log_level": "info",
-                "debug": false,
-                "host": "db.example.com",
-                "port": 5432
+                "config": {
+                    "app_name": "super-app",
+                    "log_level": "info",
+                    "debug": false,
+                    "host": "db.example.com",
+                    "port": 5432
+                }
             }"#,
         );
         let path = Utf8PathBuf::from_path_buf(file.path().to_path_buf()).unwrap();
@@ -883,7 +1070,7 @@ mod tests {
     fn test_flatten_config_unknown_key_detection() {
         // JSON with an unknown key at the flattened level
         let file = create_temp_json(
-            r#"{"name": "myapp", "log_level": "debug", "debug": true, "unknown_field": 123}"#,
+            r#"{"config": {"name": "myapp", "log_level": "debug", "debug": true, "unknown_field": 123}}"#,
         );
         let path = Utf8PathBuf::from_path_buf(file.path().to_path_buf()).unwrap();
 
@@ -935,8 +1122,10 @@ mod tests {
     fn test_enum_valid_variant_no_warning() {
         // Valid variant should not produce a warning
         let schema = Schema::from_shape(ArgsWithEnumConfig::SHAPE).unwrap();
-        let config =
-            FileConfig::new().content(r#"{"log_level": "Debug", "port": 8080}"#, "config.json");
+        let config = FileConfig::new().content(
+            r#"{"config": {"log_level": "Debug", "port": 8080}}"#,
+            "config.json",
+        );
 
         let result = parse_file(&schema, &config);
 
@@ -951,8 +1140,10 @@ mod tests {
     fn test_enum_invalid_variant_produces_warning() {
         // Invalid variant should produce a warning with helpful message
         let schema = Schema::from_shape(ArgsWithEnumConfig::SHAPE).unwrap();
-        let config =
-            FileConfig::new().content(r#"{"log_level": "Debugg", "port": 8080}"#, "config.json"); // typo
+        let config = FileConfig::new().content(
+            r#"{"config": {"log_level": "Debugg", "port": 8080}}"#,
+            "config.json",
+        ); // typo
 
         let result = parse_file(&schema, &config);
 
@@ -994,7 +1185,8 @@ mod tests {
     fn test_optional_enum_validation() {
         // Optional enum should also be validated
         let schema = Schema::from_shape(ArgsWithOptionalEnumConfig::SHAPE).unwrap();
-        let config = FileConfig::new().content(r#"{"log_level": "invalid"}"#, "config.json");
+        let config =
+            FileConfig::new().content(r#"{"config": {"log_level": "invalid"}}"#, "config.json");
 
         let result = parse_file(&schema, &config);
 
@@ -1025,8 +1217,10 @@ mod tests {
     fn test_nested_enum_validation() {
         // Enum in nested struct should be validated
         let schema = Schema::from_shape(ArgsWithNestedEnumConfig::SHAPE).unwrap();
-        let config =
-            FileConfig::new().content(r#"{"logging": {"level": "unknown"}}"#, "config.json");
+        let config = FileConfig::new().content(
+            r#"{"config": {"logging": {"level": "unknown"}}}"#,
+            "config.json",
+        );
 
         let result = parse_file(&schema, &config);
 

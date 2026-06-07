@@ -19,6 +19,7 @@
 #![allow(clippy::result_large_err)]
 
 use std::marker::PhantomData;
+use std::path::PathBuf;
 use std::string::String;
 use std::vec::Vec;
 
@@ -30,7 +31,12 @@ use crate::config_value_parser::{fill_defaults_from_schema, from_config_value};
 use crate::dump::dump_config_with_schema;
 use crate::enum_conflicts::detect_enum_conflicts;
 use crate::env_subst::{EnvSubstError, RealEnv, substitute_env_vars};
-use crate::help::generate_help_for_subcommand;
+use crate::help::{
+    generate_help_for_subcommand_with_config_formats, generate_help_list_for_subcommand,
+    generate_root_html_help_with_config_formats_and_anchor, html_help_anchor_for_subcommand_path,
+    implementation_source_for_subcommand_path, open_html_help_file, write_html_help_to_temp_file,
+};
+use crate::json_schema::{JsonSchemaError, write_json_schema_files};
 use crate::layers::{cli::parse_cli, env::parse_env, file::parse_file};
 use crate::merge::merge_layers;
 use crate::missing::{
@@ -56,9 +62,23 @@ pub struct LayerOutput {
     /// For file layers, this is the file contents.
     /// For CLI, this is the concatenated args.
     pub source_text: Option<String>,
-    /// Config file path captured from CLI (e.g., `--config path/to/file.json`).
-    /// Only set by the CLI layer when the user specifies a config file path.
-    pub config_file_path: Option<camino::Utf8PathBuf>,
+    /// Config file paths captured from CLI, keyed by config root field name.
+    ///
+    /// This is used when a schema has multiple `args::config` fields. For
+    /// example, `--cfg cfg.json` should load `cfg.json` as the `cfg` block, not
+    /// as a top-level file containing every config root.
+    pub config_file_paths: indexmap::IndexMap<String, camino::Utf8PathBuf>,
+    /// Requested pseudo-help list mode (from `help list` shorthand), if any.
+    pub help_list_mode: Option<HelpListMode>,
+}
+
+/// Mode for pseudo-help listing (`help list`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpListMode {
+    /// Show full help text for each immediate subcommand.
+    Full,
+    /// Show only immediate subcommand names.
+    Short,
 }
 
 /// A key that was unused by the schema, with provenance.
@@ -140,6 +160,14 @@ impl<T: Facet<'static>> Driver<T> {
         }
     }
 
+    fn config_file_extensions(&self) -> Vec<&str> {
+        self.config
+            .file_config
+            .as_ref()
+            .map(|file_config| file_config.registry.extensions())
+            .unwrap_or_else(|| vec!["json"])
+    }
+
     /// Execute the driver and return an outcome.
     ///
     /// The returned `DriverOutcome` must be handled explicitly:
@@ -170,9 +198,10 @@ impl<T: Facet<'static>> Driver<T> {
         // Phase 1: Parse each layer
         // Priority order (lowest to highest): defaults < file < env < cli
         //
-        // Note: CLI is parsed first to capture the config file path (--config <path>),
-        // which is then used by the file layer. The priority ordering is enforced
-        // during the merge phase, not the parse phase.
+        // Note: CLI is parsed first to capture config-root file paths
+        // (`--config <path>`, `--cfg <path>`, etc.), which are then used by the
+        // file layer. The priority ordering is enforced during the merge phase,
+        // not the parse phase.
 
         // 1a. Defaults layer (TODO: extract defaults from schema)
         // For now, defaults is empty - this will be filled in when we implement
@@ -187,10 +216,10 @@ impl<T: Facet<'static>> Driver<T> {
 
         // 1c. File layer (uses config file path from CLI if provided)
         // If CLI provided a config file path, update the file config to use it
-        if let Some(ref cli_path) = layers.cli.config_file_path {
+        if !layers.cli.config_file_paths.is_empty() {
             // Get mutable access to file_config, creating a default if none exists
             let file_config = self.config.file_config.get_or_insert_with(Default::default);
-            file_config.explicit_path = Some(cli_path.clone());
+            file_config.explicit_paths_by_root = layers.cli.config_file_paths.clone();
         }
 
         if let Some(ref file_config) = self.config.file_config {
@@ -232,12 +261,69 @@ impl<T: Facet<'static>> Driver<T> {
                     Vec::new()
                 };
 
-                let text = generate_help_for_subcommand(
+                let config_file_extensions = self.config_file_extensions();
+                let mut text = if let Some(mode) = layers.cli.help_list_mode {
+                    generate_help_list_for_subcommand(
+                        &self.config.schema,
+                        &subcommand_path,
+                        &help_config,
+                        mode,
+                    )
+                } else {
+                    generate_help_for_subcommand_with_config_formats(
+                        &self.config.schema,
+                        &subcommand_path,
+                        &help_config,
+                        &config_file_extensions,
+                    )
+                };
+                maybe_append_implementation_source::<T>(&mut text, &help_config, &subcommand_path);
+                return DriverOutcome::err(DriverError::Help {
+                    text,
+                    suggestion: None,
+                });
+            }
+
+            // Check for --html-help
+            if let Some(ref html_help_path) = special.html_help
+                && let Some(ConfigValue::Bool(b)) = cli_value.get_by_path(html_help_path)
+                && b.value
+            {
+                let help_config = self
+                    .config
+                    .help_config
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_default();
+
+                let subcommand_path = if let Some(subcommand_field) =
+                    self.config.schema.args().subcommand_field_name()
+                {
+                    cli_value.extract_subcommand_path(subcommand_field)
+                } else {
+                    Vec::new()
+                };
+
+                // HTML help is an app-wide document. Even when `--html-help` is
+                // requested after a subcommand has already been parsed, render
+                // the root document so users get the complete tool reference;
+                // use the parsed subcommand path only as the initial anchor.
+                let initial_anchor =
+                    html_help_anchor_for_subcommand_path(&self.config.schema, &subcommand_path);
+                let config_file_extensions = self.config_file_extensions();
+                let html = generate_root_html_help_with_config_formats_and_anchor(
                     &self.config.schema,
-                    &subcommand_path,
                     &help_config,
+                    &config_file_extensions,
+                    initial_anchor.as_deref(),
                 );
-                return DriverOutcome::err(DriverError::Help { text });
+
+                match write_html_help_to_temp_file(&html) {
+                    Ok(path) => return DriverOutcome::err(DriverError::HtmlHelp { path }),
+                    Err(error) => {
+                        return DriverOutcome::err(DriverError::HtmlHelpFailed { error });
+                    }
+                }
             }
 
             // Check for --version
@@ -262,33 +348,121 @@ impl<T: Facet<'static>> Driver<T> {
                 return DriverOutcome::err(DriverError::Version { text });
             }
 
+            // Check for --export-jsonschemas <dir>
+            if let Some(ref export_jsonschemas_path) = special.export_jsonschemas
+                && let Some(value) = cli_value.get_by_path(export_jsonschemas_path)
+            {
+                match extract_string_from_value(value) {
+                    Some(output_dir) => {
+                        let files = self.config.generate_json_schemas();
+                        match write_json_schema_files(&output_dir, &files) {
+                            Ok(paths) => {
+                                return DriverOutcome::err(DriverError::JsonSchemasExported {
+                                    paths,
+                                });
+                            }
+                            Err(error) => {
+                                return DriverOutcome::err(DriverError::JsonSchemaExport { error });
+                            }
+                        }
+                    }
+                    None => {
+                        all_diagnostics.push(Diagnostic {
+                            message: "export-jsonschemas requires an output directory".to_string(),
+                            label: None,
+                            path: None,
+                            span: None,
+                            severity: Severity::Error,
+                        });
+                    }
+                }
+            }
+
             // Check for --completions <shell>
             if let Some(ref completions_path) = special.completions
                 && let Some(value) = cli_value.get_by_path(completions_path)
             {
-                // The value should be a string representing the shell name
-                if let Some(shell) = extract_shell_from_value(value) {
-                    let program_name = self
-                        .config
-                        .help_config
-                        .as_ref()
-                        .and_then(|h| h.program_name.clone())
-                        .or_else(|| std::env::args().next())
-                        .unwrap_or_else(|| "program".to_string());
-                    let script = generate_completions_for_shape(T::SHAPE, shell, &program_name);
-                    return DriverOutcome::err(DriverError::Completions { script });
+                match extract_shell_from_value(value) {
+                    Some(shell) => {
+                        let program_name = self
+                            .config
+                            .help_config
+                            .as_ref()
+                            .and_then(|h| h.program_name.clone())
+                            .or_else(|| std::env::args().next())
+                            .unwrap_or_else(|| "program".to_string());
+                        let script = generate_completions_for_shape(T::SHAPE, shell, &program_name);
+                        return DriverOutcome::err(DriverError::Completions { script });
+                    }
+                    None => {
+                        // Either auto-detection failed or an unknown shell name was given.
+                        let msg = if is_auto_detect_sentinel(value) {
+                            "could not auto-detect shell; please specify one of: bash, zsh, fish"
+                                .to_string()
+                        } else {
+                            let given = match value {
+                                ConfigValue::String(s) => s.value.clone(),
+                                _ => "<unknown>".to_string(),
+                            };
+                            format!("unknown shell '{given}', valid values are: bash, zsh, fish")
+                        };
+                        all_diagnostics.push(Diagnostic {
+                            message: msg,
+                            label: None,
+                            path: None,
+                            span: None,
+                            severity: Severity::Error,
+                        });
+                    }
                 }
             }
         }
 
-        // Check for errors before proceeding
+        // Check for errors before proceeding.
+        //
+        // CLI/file/env parsing produced one or more hard errors (unknown flag,
+        // bad value, ...). Before bailing, build the same rich context we show
+        // for missing-field errors: a dump of everything that *was* understood
+        // (so the user sees what stuck and which flags exist), a usage hint,
+        // and finally the precise diagnostics pointing at the offending input —
+        // rendered last so they sit right above the prompt.
         let has_errors = all_diagnostics
             .iter()
             .any(|d| d.severity == Severity::Error);
         if has_errors {
+            // Merge what parsed so far for a "this is what I understood" dump.
+            // env-var substitution is intentionally skipped here: it can itself
+            // fail, and the parse error is the more actionable thing to show.
+            let display_value = {
+                let values: Vec<ConfigValue> = [
+                    layers.defaults.value.clone(),
+                    layers.file.value.clone(),
+                    layers.env.value.clone(),
+                    layers.cli.value.clone(),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                let merged = merge_layers(values);
+                fill_defaults_from_schema(&merged.value, &self.config.schema)
+            };
+            let dump = render_config_dump(&display_value, &file_resolution, &self.config.schema);
+
+            let mut diagnostics = Vec::with_capacity(all_diagnostics.len() + 1);
+            diagnostics.push(Diagnostic {
+                message: format!(
+                    "could not parse command-line arguments\n\n{dump}\nRun with --help for usage information."
+                ),
+                label: None,
+                path: None,
+                span: None,
+                severity: Severity::Error,
+            });
+            diagnostics.extend(all_diagnostics);
+
             return DriverOutcome::err(DriverError::Failed {
                 report: Box::new(DriverReport {
-                    diagnostics: all_diagnostics,
+                    diagnostics,
                     layers,
                     file_resolution,
                     overrides: Vec::new(),
@@ -316,13 +490,16 @@ impl<T: Facet<'static>> Driver<T> {
         // Phase 2.5: Environment variable substitution
         // Substitute ${VAR} patterns in string values where env_subst is enabled
         let mut merged_value = merged.value;
-        if let Some(config_schema) = self.config.schema.config()
-            && let ConfigValue::Object(ref mut sourced_fields) = merged_value
-            && let Some(config_field_name) = config_schema.field_name()
-            && let Some(config_value) = sourced_fields.value.get_mut(&config_field_name.to_string())
-            && let Err(e) = substitute_env_vars(config_value, config_schema, &RealEnv)
-        {
-            return DriverOutcome::err(DriverError::EnvSubst { error: e });
+        if let ConfigValue::Object(ref mut sourced_fields) = merged_value {
+            for config_schema in self.config.schema.configs() {
+                if let Some(config_field_name) = config_schema.field_name()
+                    && let Some(config_value) =
+                        sourced_fields.value.get_mut(&config_field_name.to_string())
+                    && let Err(e) = substitute_env_vars(config_value, config_schema, &RealEnv)
+                {
+                    return DriverOutcome::err(DriverError::EnvSubst { error: e });
+                }
+            }
         }
         tracing::debug!(merged_value = ?merged_value, "driver: after env_subst");
 
@@ -415,8 +592,18 @@ impl<T: Facet<'static>> Driver<T> {
                     .cloned()
                     .unwrap_or_default();
 
-                let help = generate_help_for_subcommand(&self.config.schema, &[], &help_config);
-                return DriverOutcome::err(DriverError::Help { text: help });
+                let config_file_extensions = self.config_file_extensions();
+                let mut help = generate_help_for_subcommand_with_config_formats(
+                    &self.config.schema,
+                    &[],
+                    &help_config,
+                    &config_file_extensions,
+                );
+                maybe_append_implementation_source::<T>(&mut help, &help_config, &[]);
+                return DriverOutcome::err(DriverError::Help {
+                    text: help,
+                    suggestion: None,
+                });
             }
 
             // Check if the only missing field is a subcommand with available variants
@@ -426,62 +613,38 @@ impl<T: Facet<'static>> Driver<T> {
                 && !missing_fields[0].available_subcommands.is_empty();
 
             if missing_subcommand_with_variants {
-                let field = &missing_fields[0];
+                let help_config = self
+                    .config
+                    .help_config
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_default();
 
-                // Format the available subcommands list
-                let items: Vec<(String, Option<&str>)> = field
-                    .available_subcommands
-                    .iter()
-                    .map(|sub| (sub.name.clone(), sub.doc.as_deref()))
-                    .collect();
+                // Walk as far as the user got into the subcommand tree so we
+                // show help for the right level (e.g. `hx hosts` → hosts help).
+                let subcommand_path = if let Some(subcommand_field) =
+                    self.config.schema.args().subcommand_field_name()
+                {
+                    layers
+                        .cli
+                        .value
+                        .as_ref()
+                        .map(|v| v.extract_subcommand_path(subcommand_field))
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
 
-                // Find max width for alignment
-                let max_width = items.iter().map(|(name, _)| name.len()).max().unwrap_or(0);
-                let mut cmds = String::new();
-                for (name, doc) in &items {
-                    use std::fmt::Write;
-                    write!(cmds, "  {name}").unwrap();
-                    let padding = max_width.saturating_sub(name.len());
-                    for _ in 0..padding {
-                        cmds.push(' ');
-                    }
-                    if let Some(doc) = doc {
-                        write!(cmds, "  {}", doc.trim()).unwrap();
-                    }
-                    cmds.push('\n');
-                }
-
-                let mut diagnostics = vec![Diagnostic {
-                    message: format!(
-                        "expected a subcommand\n\navailable subcommands:\n{}",
-                        cmds.trim_end()
-                    ),
-                    label: None,
-                    path: None,
-                    span: None,
-                    severity: Severity::Error,
-                }];
-
-                // Add help hint if the schema has a help field
-                if self.config.schema.special().help.is_some() {
-                    diagnostics.push(Diagnostic {
-                        message: "Run with --help for usage information.".to_string(),
-                        label: None,
-                        path: None,
-                        span: None,
-                        severity: Severity::Note,
-                    });
-                }
-
-                return DriverOutcome::err(DriverError::Failed {
-                    report: Box::new(DriverReport {
-                        diagnostics,
-                        layers,
-                        file_resolution,
-                        overrides,
-                        cli_args_source: cli_args_display.to_string(),
-                        source_name: "<cli>".to_string(),
-                    }),
+                let config_file_extensions = self.config_file_extensions();
+                let help = generate_help_for_subcommand_with_config_formats(
+                    &self.config.schema,
+                    &subcommand_path,
+                    &help_config,
+                    &config_file_extensions,
+                );
+                return DriverOutcome::err(DriverError::Help {
+                    text: help,
+                    suggestion: None,
                 });
             }
 
@@ -494,47 +657,60 @@ impl<T: Facet<'static>> Driver<T> {
                     .all(|f| matches!(f.kind, crate::missing::MissingFieldKind::CliArg));
 
             if all_cli_missing {
-                // Use corrected command as source with proper diagnostics
-                let mut corrected = build_corrected_command_diagnostics(
+                let help_config = self
+                    .config
+                    .help_config
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_default();
+
+                let subcommand_path = if let Some(subcommand_field) =
+                    self.config.schema.args().subcommand_field_name()
+                {
+                    layers
+                        .cli
+                        .value
+                        .as_ref()
+                        .map(|v| v.extract_subcommand_path(subcommand_field))
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+
+                let config_file_extensions = self.config_file_extensions();
+                let help = generate_help_for_subcommand_with_config_formats(
+                    &self.config.schema,
+                    &subcommand_path,
+                    &help_config,
+                    &config_file_extensions,
+                );
+
+                // Build the Ariadne corrected-command suggestion so the user
+                // can see exactly which argument is missing, right above the
+                // prompt where it's easy to spot.
+                let corrected = build_corrected_command_diagnostics(
                     &missing_fields,
                     cli_args_source.as_deref(),
                 );
+                let suggestion = Box::new(DriverReport {
+                    diagnostics: corrected.diagnostics,
+                    layers,
+                    file_resolution,
+                    overrides,
+                    cli_args_source: corrected.corrected_source,
+                    source_name: "<usage>".to_string(),
+                });
 
-                // Add help hint if the schema has a help field
-                if self.config.schema.special().help.is_some() {
-                    corrected.diagnostics.push(Diagnostic {
-                        message: "Run with --help for usage information.".to_string(),
-                        label: None,
-                        path: None,
-                        span: None,
-                        severity: Severity::Note,
-                    });
-                }
-
-                return DriverOutcome::err(DriverError::Failed {
-                    report: Box::new(DriverReport {
-                        diagnostics: corrected.diagnostics,
-                        layers,
-                        file_resolution,
-                        overrides,
-                        cli_args_source: corrected.corrected_source,
-                        source_name: "<suggestion>".to_string(),
-                    }),
+                return DriverOutcome::err(DriverError::Help {
+                    text: help,
+                    suggestion: Some(suggestion),
                 });
             }
 
             let message = {
                 // Use detailed format with config dump
-                let mut dump_buf = Vec::new();
-                let resolution = file_resolution.as_ref().cloned().unwrap_or_default();
-                dump_config_with_schema(
-                    &mut dump_buf,
-                    &value_with_defaults,
-                    &resolution,
-                    &self.config.schema,
-                );
                 let dump =
-                    String::from_utf8(dump_buf).unwrap_or_else(|_| "error rendering dump".into());
+                    render_config_dump(&value_with_defaults, &file_resolution, &self.config.schema);
 
                 // Build error message with both missing fields and unknown keys
                 let mut message_parts = Vec::new();
@@ -560,13 +736,27 @@ impl<T: Facet<'static>> Driver<T> {
 
                 // Format the summary of unknown keys with suggestions
                 let unknown_summary = if has_unknown {
-                    let config_schema = self.config.schema.config();
                     let unknown_list: Vec<String> = unknown_keys
                         .iter()
                         .map(|uk| {
                             let source = uk.provenance.source_description();
-                            let suggestion = config_schema
-                                .map(|cs| crate::suggest::suggest_config_path(cs, &uk.key))
+                            let suggestion = self
+                                .config
+                                .schema
+                                .configs()
+                                .iter()
+                                .find_map(|cs| {
+                                    let key = if self.config.schema.configs().len() > 1 {
+                                        let field_name = cs.field_name()?;
+                                        uk.key
+                                            .strip_prefix(&[field_name.to_string()][..])
+                                            .unwrap_or(&uk.key)
+                                    } else {
+                                        &uk.key
+                                    };
+                                    let suggestion = crate::suggest::suggest_config_path(cs, key);
+                                    (!suggestion.is_empty()).then_some(suggestion)
+                                })
                                 .unwrap_or_default();
                             format!("  {} (from {}){}", uk.key.join("."), source, suggestion)
                         })
@@ -603,6 +793,10 @@ impl<T: Facet<'static>> Driver<T> {
         // Phase 4: Assign virtual spans and deserialize into T
         // The span registry maps virtual spans back to real source locations
         let mut value_with_virtual_spans = value_with_defaults;
+        flatten_config_roots_for_deserialization(
+            &mut value_with_virtual_spans,
+            &self.config.schema,
+        );
         let span_registry = assign_virtual_spans(&mut value_with_virtual_spans);
 
         let value: T = match from_config_value(&value_with_virtual_spans) {
@@ -659,6 +853,89 @@ impl<T: Facet<'static>> Driver<T> {
             merged_config: value_with_virtual_spans,
             schema: self.config.schema.clone(),
         })
+    }
+}
+
+/// Render the provenance-annotated config dump (the "this is what I
+/// understood" tree, including the `Sources:` header) into a string.
+fn render_config_dump(
+    value: &ConfigValue,
+    file_resolution: &Option<FileResolution>,
+    schema: &crate::schema::Schema,
+) -> String {
+    let mut dump_buf = Vec::new();
+    let resolution = file_resolution.as_ref().cloned().unwrap_or_default();
+    dump_config_with_schema(&mut dump_buf, value, &resolution, schema);
+    String::from_utf8(dump_buf).unwrap_or_else(|_| "error rendering dump".into())
+}
+
+fn flatten_config_roots_for_deserialization(
+    value: &mut ConfigValue,
+    schema: &crate::schema::Schema,
+) {
+    let ConfigValue::Object(root) = value else {
+        return;
+    };
+
+    for config_schema in schema.configs() {
+        if !config_schema.flattened_root() {
+            continue;
+        }
+
+        let Some(field_name) = config_schema.field_name() else {
+            continue;
+        };
+
+        let Some(config_value) = root.value.shift_remove(field_name) else {
+            continue;
+        };
+
+        match config_value {
+            ConfigValue::Object(config_object) => {
+                for (key, value) in config_object.value {
+                    root.value.insert(key, value);
+                }
+            }
+            other => {
+                root.value.insert(field_name.to_string(), other);
+            }
+        }
+    }
+}
+
+fn maybe_append_implementation_source<T: Facet<'static>>(
+    help_text: &mut String,
+    help_config: &crate::help::HelpConfig,
+    subcommand_path: &[String],
+) {
+    let Some(source_file) = implementation_source_for_subcommand_path(T::SHAPE, subcommand_path)
+    else {
+        return;
+    };
+
+    let implementation_url = help_config
+        .implementation_url
+        .as_ref()
+        .map(|render_url| render_url(source_file));
+
+    if !help_config.include_implementation_source_file && implementation_url.is_none() {
+        return;
+    }
+
+    if !help_text.ends_with('\n') {
+        help_text.push('\n');
+    }
+    help_text.push('\n');
+    help_text.push_str("Implementation:\n");
+    if help_config.include_implementation_source_file {
+        help_text.push_str("    ");
+        help_text.push_str(source_file);
+        help_text.push('\n');
+    }
+    if let Some(implementation_url) = implementation_url {
+        help_text.push_str("    ");
+        help_text.push_str(&implementation_url);
+        help_text.push('\n');
     }
 }
 
@@ -810,6 +1087,7 @@ impl<T> DriverOutcome<T> {
     /// | `--help` passed | Prints help to stdout, exits with code 0 |
     /// | `--version` passed | Prints version to stdout, exits with code 0 |
     /// | `--completions` passed | Prints shell script to stdout, exits with code 0 |
+    /// | `--export-jsonschemas` passed | Writes schemas, prints paths to stdout, exits with code 0 |
     /// | Parse failed | Prints diagnostics to stderr, exits with code 1 |
     ///
     /// # Example
@@ -836,16 +1114,37 @@ impl<T> DriverOutcome<T> {
     pub fn unwrap(self) -> T {
         match self.0 {
             Ok(output) => output.get(),
-            Err(DriverError::Help { text }) => {
+            Err(DriverError::Help { text, suggestion }) => {
                 println!("{}", text);
+                if let Some(s) = suggestion {
+                    println!("{}", s.render_pretty());
+                }
                 std::process::exit(0);
             }
+            Err(DriverError::HtmlHelp { path }) => match open_html_help_file(&path) {
+                Ok(()) => {
+                    println!("Opened HTML help: {}", path.display());
+                    std::process::exit(0);
+                }
+                Err(error) => {
+                    eprintln!("error: could not open HTML help: {}", error);
+                    eprintln!("HTML help was written to {}", path.display());
+                    std::process::exit(1);
+                }
+            },
             Err(DriverError::Completions { script }) => {
                 println!("{}", script);
                 std::process::exit(0);
             }
             Err(DriverError::Version { text }) => {
                 println!("{}", text);
+                std::process::exit(0);
+            }
+            Err(DriverError::JsonSchemasExported { paths }) => {
+                println!("Wrote JSON Schema files:");
+                for path in paths {
+                    println!("{}", path.display());
+                }
                 std::process::exit(0);
             }
             Err(DriverError::Failed { report }) => {
@@ -856,8 +1155,16 @@ impl<T> DriverOutcome<T> {
                 eprintln!("{}", error);
                 std::process::exit(1);
             }
+            Err(DriverError::JsonSchemaExport { error }) => {
+                eprintln!("{}", error);
+                std::process::exit(1);
+            }
             Err(DriverError::EnvSubst { error }) => {
                 eprintln!("error: {}", error);
+                std::process::exit(1);
+            }
+            Err(DriverError::HtmlHelpFailed { error }) => {
+                eprintln!("error: could not write HTML help: {}", error);
                 std::process::exit(1);
             }
         }
@@ -1162,13 +1469,16 @@ impl Severity {
 /// Extract a Shell value from a ConfigValue.
 ///
 /// The completions field is `Option<Shell>`, so after CLI parsing we get
-/// either nothing (None) or a string like "bash", "zsh", "fish".
+/// either nothing (None) or a string like "bash", "zsh", "fish", or the
+/// sentinel "auto" (injected by the CLI parser when no value was provided).
 fn extract_shell_from_value(value: &ConfigValue) -> Option<Shell> {
     match value {
         ConfigValue::String(s) => match s.value.to_lowercase().as_str() {
             "bash" => Some(Shell::Bash),
             "zsh" => Some(Shell::Zsh),
             "fish" => Some(Shell::Fish),
+            // "auto" sentinel: attempt runtime shell detection
+            "auto" => Shell::detect(),
             _ => None,
         },
         // Could also be an enum variant name directly
@@ -1182,14 +1492,27 @@ fn extract_shell_from_value(value: &ConfigValue) -> Option<Shell> {
     }
 }
 
+fn extract_string_from_value(value: &ConfigValue) -> Option<String> {
+    match value {
+        ConfigValue::String(s) => Some(s.value.clone()),
+        _ => None,
+    }
+}
+
+/// Returns true when the completions value is the "auto" sentinel inserted by
+/// the CLI parser for `--completions` with no explicit argument.
+fn is_auto_detect_sentinel(value: &ConfigValue) -> bool {
+    matches!(value, ConfigValue::String(s) if s.value == "auto")
+}
+
 /// Reason the driver did not produce a parsed value.
 ///
 /// This enum covers two distinct cases:
 ///
 /// - **Early exits** ([`Help`](Self::Help), [`Version`](Self::Version),
-///   [`Completions`](Self::Completions)) — the user asked for something other than
-///   running the program. These have exit code 0 and are "errors" only in the sense
-///   that no `T` was produced.
+///   [`Completions`](Self::Completions), [`JsonSchemasExported`](Self::JsonSchemasExported)) —
+///   the user asked for something other than running the program. These have exit code 0
+///   and are "errors" only in the sense that no `T` was produced.
 ///
 /// - **Actual errors** ([`Failed`](Self::Failed), [`Builder`](Self::Builder),
 ///   [`EnvSubst`](Self::EnvSubst)) — something went wrong. These have exit code 1.
@@ -1206,8 +1529,10 @@ fn extract_shell_from_value(value: &ConfigValue) -> Option<Shell> {
 /// | `Help` | 0 | Early exit |
 /// | `Version` | 0 | Early exit |
 /// | `Completions` | 0 | Early exit |
+/// | `JsonSchemasExported` | 0 | Early exit |
 /// | `Failed` | 1 | Error |
 /// | `Builder` | 1 | Error |
+/// | `JsonSchemaExport` | 1 | Error |
 /// | `EnvSubst` | 1 | Error |
 ///
 /// # Example
@@ -1235,9 +1560,9 @@ fn extract_shell_from_value(value: &ConfigValue) -> Option<Shell> {
 ///     Ok(output) => {
 ///         // use output.value
 ///     }
-///     Err(DriverError::Help { text }) => {
-///         assert!(text.contains("--help"));
+///     Err(DriverError::Help { text, .. }) => {
 ///         // print text and exit(0)
+///         let _ = text;
 ///     }
 ///     Err(DriverError::Version { text }) => {
 ///         // print text and exit(0)
@@ -1278,6 +1603,26 @@ pub enum DriverError {
     Help {
         /// Formatted help text ready to print to stdout.
         text: String,
+        /// Optional Ariadne-rendered suggestion to display after the help text
+        /// (e.g. a corrected command showing exactly which argument is missing).
+        /// Printed last so it sits close to the terminal prompt.
+        suggestion: Option<Box<DriverReport>>,
+    },
+
+    /// HTML help was requested (via the built-in `FigueBuiltins::html_help` field).
+    ///
+    /// Exit code: 0 if the generated file opens successfully.
+    HtmlHelp {
+        /// Path to the generated HTML help file.
+        path: PathBuf,
+    },
+
+    /// Writing the HTML help file failed.
+    ///
+    /// Exit code: 1
+    HtmlHelpFailed {
+        /// The I/O error that occurred while writing the HTML help file.
+        error: std::io::Error,
     },
 
     /// Shell completions were requested (via `#[facet(figue::completions)]` field).
@@ -1300,6 +1645,24 @@ pub enum DriverError {
         text: String,
     },
 
+    /// JSON Schema files were exported.
+    ///
+    /// Exit code: 0
+    ///
+    /// This is a "successful" exit - the user asked for schemas and got them.
+    JsonSchemasExported {
+        /// Paths that were written.
+        paths: Vec<PathBuf>,
+    },
+
+    /// JSON Schema export failed.
+    ///
+    /// Exit code: 1
+    JsonSchemaExport {
+        /// Export error.
+        error: JsonSchemaError,
+    },
+
     /// Environment variable substitution failed.
     ///
     /// Exit code: 1
@@ -1319,8 +1682,12 @@ impl DriverError {
             DriverError::Builder { .. } => 1,
             DriverError::Failed { .. } => 1,
             DriverError::Help { .. } => 0,
+            DriverError::HtmlHelp { .. } => 0,
+            DriverError::HtmlHelpFailed { .. } => 1,
             DriverError::Completions { .. } => 0,
             DriverError::Version { .. } => 0,
+            DriverError::JsonSchemasExported { .. } => 0,
+            DriverError::JsonSchemaExport { .. } => 1,
             DriverError::EnvSubst { .. } => 1,
         }
     }
@@ -1338,7 +1705,7 @@ impl DriverError {
     /// Returns the help text if this is a help request.
     pub fn help_text(&self) -> Option<&str> {
         match self {
-            DriverError::Help { text } => Some(text),
+            DriverError::Help { text, .. } => Some(text),
             _ => None,
         }
     }
@@ -1349,9 +1716,29 @@ impl std::fmt::Display for DriverError {
         match self {
             DriverError::Builder { error } => write!(f, "{}", error),
             DriverError::Failed { report } => write!(f, "{}", report),
-            DriverError::Help { text } => write!(f, "{}", text),
+            DriverError::Help { text, suggestion } => {
+                write!(f, "{}", text)?;
+                if let Some(s) = suggestion {
+                    write!(f, "\n{}", s.render_pretty())?;
+                }
+                Ok(())
+            }
+            DriverError::HtmlHelp { path } => {
+                write!(f, "HTML help written to {}", path.display())
+            }
+            DriverError::HtmlHelpFailed { error } => {
+                write!(f, "could not write HTML help: {}", error)
+            }
             DriverError::Completions { script } => write!(f, "{}", script),
             DriverError::Version { text } => write!(f, "{}", text),
+            DriverError::JsonSchemasExported { paths } => {
+                writeln!(f, "Wrote JSON Schema files:")?;
+                for path in paths {
+                    writeln!(f, "{}", path.display())?;
+                }
+                Ok(())
+            }
+            DriverError::JsonSchemaExport { error } => write!(f, "{}", error),
             DriverError::EnvSubst { error } => write!(f, "{}", error),
         }
     }
@@ -1369,20 +1756,48 @@ impl std::process::Termination for DriverError {
     fn report(self) -> std::process::ExitCode {
         // Print the appropriate output
         match &self {
-            DriverError::Help { text } | DriverError::Version { text } => {
+            DriverError::Help { text, suggestion } => {
+                println!("{}", text);
+                if let Some(s) = suggestion {
+                    println!("{}", s.render_pretty());
+                }
+            }
+            DriverError::Version { text } => {
                 println!("{}", text);
             }
             DriverError::Completions { script } => {
                 println!("{}", script);
             }
+            DriverError::JsonSchemasExported { paths } => {
+                println!("Wrote JSON Schema files:");
+                for path in paths {
+                    println!("{}", path.display());
+                }
+            }
+            DriverError::HtmlHelp { path } => match open_html_help_file(path) {
+                Ok(()) => {
+                    println!("Opened HTML help: {}", path.display());
+                }
+                Err(error) => {
+                    eprintln!("error: could not open HTML help: {}", error);
+                    eprintln!("HTML help was written to {}", path.display());
+                    return std::process::ExitCode::from(1);
+                }
+            },
             DriverError::Failed { report } => {
                 eprintln!("{}", report.render_pretty());
             }
             DriverError::Builder { error } => {
                 eprintln!("{}", error);
             }
+            DriverError::JsonSchemaExport { error } => {
+                eprintln!("{}", error);
+            }
             DriverError::EnvSubst { error } => {
                 eprintln!("error: {}", error);
+            }
+            DriverError::HtmlHelpFailed { error } => {
+                eprintln!("error: could not write HTML help: {}", error);
             }
         }
         std::process::ExitCode::from(self.exit_code() as u8)
@@ -1410,6 +1825,42 @@ mod tests {
         builtins: FigueBuiltins,
     }
 
+    #[derive(Facet, Debug)]
+    struct ArgsWithConfigAndBuiltins {
+        /// Application configuration
+        #[facet(figue::config)]
+        config: HelpTestConfig,
+
+        #[facet(flatten)]
+        builtins: FigueBuiltins,
+    }
+
+    #[derive(Facet, Debug)]
+    struct HelpTestConfig {
+        #[facet(default = "localhost")]
+        host: String,
+    }
+
+    #[derive(Facet, Debug)]
+    struct OptionalConfigArgs {
+        #[facet(figue::config)]
+        config: Option<RequiredTestConfig>,
+    }
+
+    #[derive(Facet, Debug)]
+    struct RequiredConfigArgs {
+        #[facet(figue::config)]
+        config: RequiredTestConfig,
+    }
+
+    #[derive(Facet, Debug)]
+    struct RequiredTestConfig {
+        database_url: String,
+
+        #[facet(default = 8080)]
+        port: u16,
+    }
+
     #[test]
     fn test_driver_help_flag() {
         let config = builder::<ArgsWithBuiltins>()
@@ -1422,7 +1873,7 @@ mod tests {
         let result = driver.run().into_result();
 
         match result {
-            Err(DriverError::Help { text }) => {
+            Err(DriverError::Help { text, .. }) => {
                 assert!(
                     text.contains("test-app"),
                     "help should contain program name"
@@ -1448,6 +1899,27 @@ mod tests {
             matches!(result, Err(DriverError::Help { .. })),
             "expected DriverError::Help"
         );
+    }
+
+    #[test]
+    fn test_driver_help_shows_registered_config_file_formats() {
+        let config = builder::<ArgsWithConfigAndBuiltins>()
+            .unwrap()
+            .cli(|cli| cli.args(["--help"]))
+            .file(|file| file.format(crate::JsoncFormat))
+            .build();
+
+        let driver = Driver::new(config);
+        let result = driver.run().into_result();
+
+        match result {
+            Err(DriverError::Help { text, .. }) => {
+                let text = strip_ansi_escapes::strip_str(&text);
+                assert!(text.contains("--config <FILE>"));
+                assert!(text.contains("Supported file formats: .json, .jsonc."));
+            }
+            other => panic!("expected DriverError::Help, got {:?}", other),
+        }
     }
 
     #[test]
@@ -1569,6 +2041,27 @@ mod tests {
     }
 
     #[test]
+    fn test_driver_export_jsonschemas() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let arg = format!("--export-jsonschemas={}", tempdir.path().display());
+        let config = builder::<ArgsWithConfigAndBuiltins>()
+            .unwrap()
+            .cli(|cli| cli.args([arg]))
+            .build();
+
+        let driver = Driver::new(config);
+        let result = driver.run().into_result();
+
+        match result {
+            Err(DriverError::JsonSchemasExported { paths }) => {
+                assert_eq!(paths.len(), 1);
+                assert!(tempdir.path().join("config.schema.json").exists());
+            }
+            other => panic!("expected DriverError::JsonSchemasExported, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_driver_normal_execution() {
         let config = builder::<ArgsWithBuiltins>()
             .unwrap()
@@ -1590,9 +2083,92 @@ mod tests {
     }
 
     #[test]
+    fn test_optional_config_absent_deserializes_to_none() {
+        let config = builder::<OptionalConfigArgs>()
+            .unwrap()
+            .cli(|cli| cli.args(Vec::<String>::new()))
+            .build();
+
+        let result = Driver::new(config).run().into_result();
+
+        match result {
+            Ok(output) => assert!(output.value.config.is_none()),
+            Err(e) => panic!(
+                "expected optional config absence to succeed, got error: {:?}",
+                e
+            ),
+        }
+    }
+
+    #[test]
+    fn test_required_config_absent_still_errors() {
+        let config = builder::<RequiredConfigArgs>()
+            .unwrap()
+            .cli(|cli| cli.args(Vec::<String>::new()))
+            .build();
+
+        let result = Driver::new(config).run().into_result();
+
+        match result {
+            Err(DriverError::Failed { report }) => {
+                let rendered = report.render_pretty();
+                assert!(
+                    rendered.contains("Missing required fields") || rendered.contains("Missing:"),
+                    "expected missing-field error, got: {rendered}"
+                );
+            }
+            other => panic!("expected missing required config error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_optional_config_present_complete_deserializes_to_some() {
+        let config = builder::<OptionalConfigArgs>()
+            .unwrap()
+            .cli(|cli| cli.args(["--config.database-url", "postgres://localhost/app"]))
+            .build();
+
+        let result = Driver::new(config).run().into_result();
+
+        match result {
+            Ok(output) => {
+                let config = output.value.config.expect("config should be present");
+                assert_eq!(config.database_url, "postgres://localhost/app");
+                assert_eq!(config.port, 8080);
+            }
+            Err(e) => panic!(
+                "expected complete optional config to succeed, got error: {:?}",
+                e
+            ),
+        }
+    }
+
+    #[test]
+    fn test_optional_config_present_partial_still_errors() {
+        let config = builder::<OptionalConfigArgs>()
+            .unwrap()
+            .cli(|cli| cli.args(["--config.port", "9000"]))
+            .build();
+
+        let result = Driver::new(config).run().into_result();
+
+        match result {
+            Err(DriverError::Failed { report }) => {
+                let rendered = report.render_pretty();
+                assert!(
+                    rendered.contains("database_url") || rendered.contains("database-url"),
+                    "expected database_url missing-field error, got: {rendered}"
+                );
+            }
+            other => panic!("expected partial optional config to fail, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_driver_error_exit_codes() {
         let help_err = DriverError::Help {
             text: "help".to_string(),
+            suggestion: None,
         };
         let version_err = DriverError::Version {
             text: "1.0".to_string(),
@@ -1731,7 +2307,7 @@ mod tests {
         let result = Driver::new(config).run().into_result();
 
         match result {
-            Err(DriverError::Help { text }) => {
+            Err(DriverError::Help { text, .. }) => {
                 assert!(
                     text.contains("test-app"),
                     "help should contain configured program name"
@@ -1757,7 +2333,10 @@ mod tests {
         match result {
             Ok(output) => {
                 assert_eq!(output.value.command, TestCommandWithExplicitHelp::Help);
-                assert!(!output.value.builtins.help, "builtin help flag should remain false");
+                assert!(
+                    !output.value.builtins.help,
+                    "builtin help flag should remain false"
+                );
             }
             Err(e) => panic!("expected success, got error: {:?}", e),
         }

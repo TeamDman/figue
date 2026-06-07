@@ -157,6 +157,37 @@ fn test_doubledash_flags_after_dd() {
     );
 }
 
+/// Only the first `--` terminates option parsing. Any subsequent `--` is a
+/// literal operand and must be collected as a positional, not swallowed as
+/// another separator.
+#[test]
+fn test_doubledash_second_dd_is_literal() {
+    #[derive(Facet, Debug, PartialEq)]
+    struct Args {
+        #[facet(args::named, default)]
+        foo: bool,
+
+        /// Additional arguments
+        #[facet(args::positional, default)]
+        args: Vec<String>,
+    }
+
+    let args =
+        figue::from_slice::<Args>(&["--foo", "--", "cargo", "run", "--", "--config.port"]).unwrap();
+    assert_eq!(
+        args,
+        Args {
+            foo: true,
+            args: vec![
+                "cargo".to_string(),
+                "run".to_string(),
+                "--".to_string(),
+                "--config.port".to_string(),
+            ],
+        }
+    );
+}
+
 /// Reproduces <https://github.com/facet-rs/facet/issues/1486>
 /// facet-args treats arguments after -- as unexpected positional
 #[test]
@@ -452,7 +483,10 @@ fn test_subcommand_flatten_positional_vec_error_path_is_consistent() {
 
     if let Err(err) = &one {
         let msg = err.to_string();
-        assert!(msg.contains("tasks"), "error should reference tasks field: {msg}");
+        assert!(
+            msg.contains("tasks"),
+            "error should reference tasks field: {msg}"
+        );
         assert!(
             msg.contains("command::Gradle.tasks") || msg.contains("command::Gradle.command.tasks"),
             "error path should include Gradle.tasks (flattened or nested form): {msg}"
@@ -461,7 +495,10 @@ fn test_subcommand_flatten_positional_vec_error_path_is_consistent() {
 
     if let Err(err) = &many {
         let msg = err.to_string();
-        assert!(msg.contains("tasks"), "error should reference tasks field: {msg}");
+        assert!(
+            msg.contains("tasks"),
+            "error should reference tasks field: {msg}"
+        );
         assert!(
             msg.contains("command::Gradle.tasks") || msg.contains("command::Gradle.command.tasks"),
             "error path should include Gradle.tasks (flattened or nested form): {msg}"

@@ -1,6 +1,7 @@
 ---
 source: crates/figue/tests/integration/help.rs
-expression: "$crate :: common :: strip_ansi(& help)"
+assertion_line: 295
+expression: "strip_ansi_escapes :: strip_str(& help)"
 ---
 main install
 
@@ -14,7 +15,17 @@ ARGUMENTS:
             Package name to install
 
 OPTIONS:
-    -g, --global
+    -h, --help
+            Show help message and exit.
+        --html-help
+            Open HTML help in the browser and exit.
+    -V, --version
+            Show version and exit.
+        --completions <bash,zsh,fish>
+            Generate shell completions.
+        --export-jsonschemas <DIR>
+            Export JSON Schema files for all config roots.
+    -g, --[no-]global
             Install globally
-    -f, --force
+    -f, --[no-]force
             Force reinstall even if already installed

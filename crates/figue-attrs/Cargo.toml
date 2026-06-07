@@ -1,5 +1,5 @@
 [package]
-name = "figue-attrs"
+name = "teamy-figue-attrs"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,8 +9,8 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Attribute macros for figue CLI argument parsing"
-documentation = "https://docs.rs/figue-attrs"
+description = "Attribute macros for teamy-figue CLI argument parsing"
+documentation = "https://docs.rs/teamy-figue-attrs"
 readme = "README.md"
 
 [package.metadata]

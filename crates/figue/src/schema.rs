@@ -12,11 +12,13 @@ use indexmap::IndexMap;
 
 use crate::path::Path;
 
-/// Wrapper around args IndexMap that provides kebab-case lookup.
+/// Wrapper around args IndexMap that provides kebab-case canonical/alias lookup.
 ///
 /// Schema stores field names as effective names (snake_case or renamed).
-/// CLI flags come in as kebab-case. This wrapper converts schema keys to
-/// kebab-case during lookup so `--deep-flag` matches `deep_flag` in schema.
+/// CLI flags come in as kebab-case. This wrapper matches both the canonical
+/// kebab-case name and any configured long-form aliases so `--deep-flag`
+/// matches `deep_flag` in schema, and `--old-name` can still resolve to the
+/// same field when declared as an alias.
 pub struct Args<'a> {
     inner: &'a IndexMap<String, ArgSchema, RandomState>,
 }
@@ -27,7 +29,7 @@ impl<'a> Args<'a> {
     pub fn get(&self, flag_name: &str) -> Option<(&'a String, &'a ArgSchema)> {
         self.inner
             .iter()
-            .find(|(key, _)| key.to_kebab_case() == flag_name)
+            .find(|(_, schema)| schema.matches_long_flag(flag_name))
     }
 
     /// Iterate over all args with their effective names.
@@ -74,8 +76,8 @@ pub struct Schema {
     /// Top-level arguments: `--verbose`, etc.
     args: ArgLevelSchema,
 
-    /// Optional config, read from config file, environment
-    config: Option<ConfigStructSchema>,
+    /// All config roots, read from config file, environment.
+    configs: Vec<ConfigStructSchema>,
 
     /// Special fields that trigger early exit behavior.
     special: SpecialFields,
@@ -96,9 +98,17 @@ pub struct SpecialFields {
     /// The field should be a `bool`.
     pub help: Option<Path>,
 
+    /// Path to the `html_help` field - when true, write HTML help and exit 0.
+    /// The field should be a `bool`.
+    pub html_help: Option<Path>,
+
     /// Path to the `completions` field - when set, generate completions and exit 0.
     /// The field should be `Option<Shell>`.
     pub completions: Option<Path>,
+
+    /// Path to the JSON Schema export field - when set, write schemas and exit 0.
+    /// The field should be `Option<String>`.
+    pub export_jsonschemas: Option<Path>,
 
     /// Path to the `version` field - when true, show version and exit 0.
     /// The field should be a `bool`.
@@ -106,7 +116,7 @@ pub struct SpecialFields {
 }
 
 /// Schema for one "level" of arguments: top-level, a subcommand, a subcommand's subcommand etc.
-#[derive(Facet, Debug, Clone)]
+#[derive(Facet, Debug, Clone, Default)]
 #[facet(skip_all_unless_truthy)]
 pub struct ArgLevelSchema {
     /// Any valid arguments at this level, `--verbose` etc.
@@ -127,6 +137,9 @@ pub struct ArgLevelSchema {
 #[derive(Facet, Debug, Clone)]
 #[facet(skip_all_unless_truthy)]
 pub struct ConfigStructSchema {
+    /// Doc comments for the config root field, if this is a root config.
+    docs: Docs,
+
     /// Name of the field in the parent struct (e.g., "config" for `#[facet(args::config)] config: ServerConfig`).
     /// None for nested structs within config.
     field_name: Option<String>,
@@ -135,12 +148,46 @@ pub struct ConfigStructSchema {
     /// Only present on the top-level config struct, not nested structs.
     env_prefix: Option<String>,
 
+    /// Whether this root config field was originally `Option<T>`.
+    ///
+    /// The schema unwraps the inner `T` so config sources can still address its
+    /// fields, but an absent optional root should remain absent instead of being
+    /// synthesized from defaults or reported as missing.
+    optional_root: bool,
+
+    /// Whether this root config field was also marked `#[facet(flatten)]`.
+    ///
+    /// The config sources still use the root as their namespace, but the merged
+    /// value is flattened before deserialization so Facet sees the shape it
+    /// expects.
+    flattened_root: bool,
+
     /// Shape of the config struct.
     #[facet(skip)]
     shape: &'static Shape,
 
     /// Fields from the struct
     fields: IndexMap<String, ConfigFieldSchema, RandomState>,
+
+    /// Help-only groups for fields that were flattened from another struct.
+    field_groups: Vec<ConfigFieldGroupSchema>,
+}
+
+/// Help metadata for a flattened config field.
+#[derive(Facet, Debug, Clone)]
+#[facet(skip_all_unless_truthy)]
+pub struct ConfigFieldGroupSchema {
+    /// Field name of the flattened struct in the source type.
+    name: String,
+
+    /// Doc comments from the flattened field.
+    docs: Docs,
+
+    /// Fields contributed by the flattened struct.
+    fields: IndexMap<String, ConfigFieldSchema, RandomState>,
+
+    /// Nested flattened groups contributed by the flattened struct.
+    field_groups: Vec<ConfigFieldGroupSchema>,
 }
 
 #[derive(Facet, Debug, Default, Clone)]
@@ -244,6 +291,9 @@ pub struct Subcommand {
     /// Documentation for this subcommand.
     docs: Docs,
 
+    /// Optional short alias for this subcommand (e.g., `-d` for `daemon`).
+    short: Option<char>,
+
     /// Arguments for this subcommand level.
     args: ArgLevelSchema,
 
@@ -262,6 +312,19 @@ pub struct Subcommand {
 pub struct ArgSchema {
     /// Argument name / effective name (rename or field name).
     name: String,
+
+    /// Additional accepted long-form CLI flag names for this argument.
+    ///
+    /// These are stored in kebab-case without the leading `--`.
+    long_aliases: Vec<String>,
+
+    /// Path where this argument writes in ConfigValue.
+    ///
+    /// Most arguments write to `[name]`. Arguments exposed from a flattened
+    /// config root write to `[config_root, field]` so they merge with env/file
+    /// sources before the root is flattened for deserialization.
+    #[facet(skip)]
+    insertion_path: Vec<String>,
 
     /// Documentation for this argument.
     docs: Docs,
@@ -403,8 +466,8 @@ impl Schema {
 
         self.args.visit(visitor, &mut path);
 
-        if let Some(config) = &self.config {
-            path.push("config".to_string());
+        for config in &self.configs {
+            path.push(config.field_name().unwrap_or("config").to_string());
             config.visit(visitor, &mut path);
             path.pop();
         }
@@ -524,9 +587,9 @@ impl Schema {
         &self.args
     }
 
-    /// Get the config struct schema, if any.
-    pub fn config(&self) -> Option<&ConfigStructSchema> {
-        self.config.as_ref()
+    /// Get all config struct schemas.
+    pub fn configs(&self) -> &[ConfigStructSchema] {
+        &self.configs
     }
 
     /// Get the special fields (help, version, completions) if detected.
@@ -602,9 +665,44 @@ impl ArgSchema {
         &self.name
     }
 
+    /// Get the ConfigValue insertion path for this argument.
+    pub fn insertion_path(&self) -> &[String] {
+        &self.insertion_path
+    }
+
     /// Get the argument kind (positional or named).
     pub fn kind(&self) -> &ArgKind {
         &self.kind
+    }
+
+    /// Get the canonical long-form CLI flag name for this argument.
+    ///
+    /// Returns `None` for positional arguments.
+    pub fn long_name(&self) -> Option<String> {
+        match self.kind() {
+            ArgKind::Named { .. } => Some(self.name.to_kebab_case()),
+            ArgKind::Positional => None,
+        }
+    }
+
+    /// Get the additional long-form CLI flag aliases for this argument.
+    pub fn long_aliases(&self) -> &[String] {
+        &self.long_aliases
+    }
+
+    /// Iterate over all accepted long-form CLI flag names for this argument.
+    ///
+    /// The canonical name is always yielded first, followed by any aliases.
+    pub fn long_flag_names(&self) -> impl Iterator<Item = String> + '_ {
+        self.long_name()
+            .into_iter()
+            .chain(self.long_aliases.iter().cloned())
+    }
+
+    /// Check whether this argument accepts the given long-form CLI flag name.
+    pub fn matches_long_flag(&self, flag_name: &str) -> bool {
+        self.long_name().as_deref() == Some(flag_name)
+            || self.long_aliases.iter().any(|alias| alias == flag_name)
     }
 
     /// Get the value schema.
@@ -658,6 +756,11 @@ impl Subcommand {
         &self.args
     }
 
+    /// Get the short alias for this subcommand, if configured.
+    pub fn short(&self) -> Option<char> {
+        self.short
+    }
+
     /// Check if this is a tuple variant with a flattened struct.
     /// When true, parsed fields need to be wrapped in a "0" field for deserialization.
     pub fn is_flattened_tuple(&self) -> bool {
@@ -671,6 +774,11 @@ impl Subcommand {
 }
 
 impl ConfigStructSchema {
+    /// Get documentation for this config struct.
+    pub fn docs(&self) -> &Docs {
+        &self.docs
+    }
+
     /// Get the field name in the parent struct (e.g., "config").
     pub fn field_name(&self) -> Option<&str> {
         self.field_name.as_deref()
@@ -681,14 +789,52 @@ impl ConfigStructSchema {
         self.env_prefix.as_deref()
     }
 
+    /// Check whether this root config field was originally `Option<T>`.
+    pub fn optional_root(&self) -> bool {
+        self.optional_root
+    }
+
+    /// Check whether this root config field should be flattened before
+    /// deserialization.
+    pub fn flattened_root(&self) -> bool {
+        self.flattened_root
+    }
+
     /// Get the fields of this config struct.
     pub fn fields(&self) -> &IndexMap<String, ConfigFieldSchema, RandomState> {
         &self.fields
     }
 
+    /// Get help-only flattened field groups for this config struct.
+    pub fn field_groups(&self) -> &[ConfigFieldGroupSchema] {
+        &self.field_groups
+    }
+
     /// Get the shape of this config struct.
     pub fn shape(&self) -> &'static Shape {
         self.shape
+    }
+}
+
+impl ConfigFieldGroupSchema {
+    /// Get the flattened field name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Get documentation from the flattened field.
+    pub fn docs(&self) -> &Docs {
+        &self.docs
+    }
+
+    /// Get the fields contributed by the flattened struct.
+    pub fn fields(&self) -> &IndexMap<String, ConfigFieldSchema, RandomState> {
+        &self.fields
+    }
+
+    /// Get nested flattened field groups.
+    pub fn field_groups(&self) -> &[ConfigFieldGroupSchema] {
+        &self.field_groups
     }
 }
 
@@ -745,6 +891,13 @@ impl ConfigVecSchema {
     }
 }
 
+impl LeafSchema {
+    /// Get the leaf kind.
+    pub fn kind(&self) -> &LeafKind {
+        &self.kind
+    }
+}
+
 impl ConfigEnumSchema {
     /// Get the variants of this enum.
     pub fn variants(&self) -> &IndexMap<String, ConfigEnumVariantSchema, RandomState> {
@@ -771,6 +924,43 @@ impl ConfigEnumVariantSchema {
     /// Get the documentation for this variant.
     pub fn docs(&self) -> &Docs {
         &self.docs
+    }
+}
+
+impl ConfigValueSchema {
+    /// Unwrap [Option] wrappers if present, returning the inner schema.
+    pub fn inner_if_option(&self) -> &ConfigValueSchema {
+        match self {
+            ConfigValueSchema::Option { value, .. } => value.inner_if_option(),
+            other => other,
+        }
+    }
+
+    /// Get the type identifier for display purposes.
+    pub fn type_identifier(&self) -> &'static str {
+        match self {
+            ConfigValueSchema::Struct(s) => s.shape().type_identifier,
+            ConfigValueSchema::Vec(v) => v.element().type_identifier(),
+            ConfigValueSchema::Option { value, .. } => value.type_identifier(),
+            ConfigValueSchema::Enum(e) => e.shape().type_identifier,
+            ConfigValueSchema::Leaf(leaf) => leaf.shape.type_identifier,
+        }
+    }
+
+    /// Check if this is an Option type.
+    pub fn is_option(&self) -> bool {
+        matches!(self, ConfigValueSchema::Option { .. })
+    }
+
+    /// Check if this is a boolean type, unwrapping Option if present.
+    pub fn is_bool(&self) -> bool {
+        matches!(
+            self.inner_if_option(),
+            ConfigValueSchema::Leaf(LeafSchema {
+                kind: LeafKind::Scalar(ScalarType::Bool),
+                ..
+            })
+        )
     }
 }
 

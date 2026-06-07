@@ -118,8 +118,10 @@ fn test_help_short_flag_works_with_unknown_env_keys_strict() {
 fn test_help_works_with_unknown_file_keys_strict() {
     // Config file has unknown keys AND user passes --help
     let config_json = r#"{
-        "auth": {
-            "email_from": "noreply@example.com"
+        "config": {
+            "auth": {
+                "email_from": "noreply@example.com"
+            }
         }
     }"#;
 
@@ -193,9 +195,11 @@ fn test_unknown_key_in_env_strict_mode_shows_valid_fields() {
 fn test_unknown_key_in_file_strict_mode_shows_valid_fields() {
     // Config file has unknown keys
     let config_json = r#"{
-        "auth": {
-            "email_from": "noreply@example.com",
-            "rp_id": "example.com"
+        "config": {
+            "auth": {
+                "email_from": "noreply@example.com",
+                "rp_id": "example.com"
+            }
         }
     }"#;
 
@@ -258,6 +262,26 @@ struct ArgsWithRenamedConfigField {
 
     #[facet(flatten)]
     builtins: FigueBuiltins,
+}
+
+/// Args with a config root flattened into the top-level CLI namespace.
+#[derive(Facet, Debug)]
+struct ArgsWithFlattenedConfigRoot {
+    #[facet(args::config, args::env_prefix = "APP_RUN")]
+    #[facet(flatten)]
+    run: RunConfig,
+
+    #[facet(flatten)]
+    builtins: FigueBuiltins,
+}
+
+#[derive(Facet, Debug)]
+struct RunConfig {
+    #[facet(default = "default-model")]
+    model: String,
+
+    #[facet(default)]
+    tui: bool,
 }
 
 #[test]
@@ -359,4 +383,70 @@ fn test_renamed_config_path_flag_not_silently_ignored() {
             );
         }
     }
+}
+
+#[test]
+fn test_unknown_cli_config_override_errors_without_strict_mode() {
+    let config = builder::<ArgsWithRenamedConfigField>()
+        .unwrap()
+        .cli(|cli| cli.args(["--cfg.does-not-exist", "yolo"]))
+        .build();
+
+    let err = Driver::new(config).run().unwrap_err();
+    let err_str = err.to_string();
+
+    assert!(
+        err_str.contains("unknown flag: --cfg.does-not-exist"),
+        "unknown config override should be a CLI parse error, got: {}",
+        err_str
+    );
+}
+
+#[test]
+fn test_kebab_case_cli_config_override_is_accepted() {
+    let config = builder::<ArgsWithRenamedConfigField>()
+        .unwrap()
+        .cli(|cli| cli.args(["--cfg.magic-link", "https://example.com/login"]))
+        .build();
+
+    let args = Driver::new(config).run().unwrap();
+
+    assert_eq!(
+        args.config.magic_link.as_deref(),
+        Some("https://example.com/login")
+    );
+}
+
+#[test]
+fn test_unknown_flattened_config_root_flag_errors_without_strict_mode() {
+    let config = builder::<ArgsWithFlattenedConfigRoot>()
+        .unwrap()
+        .cli(|cli| cli.args(["--does-not-exist", "yolo"]))
+        .build();
+
+    let err = Driver::new(config).run().unwrap_err();
+    let err_str = err.to_string();
+
+    assert!(
+        err_str.contains("unknown flag: --does-not-exist"),
+        "unknown flattened config root flag should be a CLI parse error, got: {}",
+        err_str
+    );
+}
+
+#[test]
+fn test_unknown_namespaced_flattened_config_root_override_errors_without_strict_mode() {
+    let config = builder::<ArgsWithFlattenedConfigRoot>()
+        .unwrap()
+        .cli(|cli| cli.args(["--run.does-not-exist", "yolo"]))
+        .build();
+
+    let err = Driver::new(config).run().unwrap_err();
+    let err_str = err.to_string();
+
+    assert!(
+        err_str.contains("unknown flag: --run.does-not-exist"),
+        "unknown namespaced flattened config root override should be a CLI parse error, got: {}",
+        err_str
+    );
 }

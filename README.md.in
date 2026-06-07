@@ -1,8 +1,8 @@
 # figue
 
-[![crates.io](https://img.shields.io/crates/v/figue.svg)](https://crates.io/crates/figue)
-[![documentation](https://docs.rs/figue/badge.svg)](https://docs.rs/figue)
-[![MIT/Apache-2.0 licensed](https://img.shields.io/crates/l/figue.svg)](LICENSE-MIT)
+[![crates.io](https://img.shields.io/crates/v/teamy-figue.svg)](https://crates.io/crates/teamy-figue)
+[![documentation](https://docs.rs/teamy-figue/badge.svg)](https://docs.rs/teamy-figue)
+[![MIT/Apache-2.0 licensed](https://img.shields.io/crates/l/teamy-figue.svg)](LICENSE-MIT)
 
 figue (pronounced 'fig', like the fruit) provides configuration parsing from
 CLI arguments, environment variables, and config files, a bit like
@@ -34,6 +34,21 @@ Ok(())
 ```
 
 The entry point of figue is [`builder`] — let yourself be guided from there.
+
+## Documentation
+
+- **Upstream guide & reference**: <https://figue.bearcove.eu> — task-oriented
+  guide, copy-paste recipes, and an exhaustive reference (attributes, grammar,
+  merge rules, error catalog).
+- **Fork API docs**: <https://docs.rs/teamy-figue>
+- **Fork differences**: [docs/content/guide/fork-differences.md](docs/content/guide/fork-differences.md) — intentional Teamy fork behavior that differs from upstream
+
+This fork uses its own semver; the exact upstream `figue` base is recorded in
+`Cargo.toml` under `workspace.metadata.teamy.upstream_figue`.
+
+The site sources live in `docs/` and are built with
+[dodeca](https://github.com/bearcove/dodeca) (`ddc serve` locally, deployed to
+GitHub Pages on push to `main`).
 
 ## Color
 

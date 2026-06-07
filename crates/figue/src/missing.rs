@@ -50,6 +50,7 @@ pub enum MissingFieldKind {
 
 /// A available subcommand name and its doc summary.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct AvailableSubcommand {
     /// CLI name (kebab-case)
     pub name: String,
@@ -182,8 +183,8 @@ pub fn collect_missing_fields(
     // Check CLI args (top-level arguments like --verbose, --output, etc.)
     collect_missing_in_arg_level(obj_map, schema.args(), "", missing);
 
-    // Check config section if present
-    if let Some(config_schema) = schema.config() {
+    // Check config sections if present
+    for config_schema in schema.configs() {
         let env_prefix = config_schema.env_prefix();
 
         // The config value is nested under the config field name
@@ -196,8 +197,9 @@ pub fn collect_missing_fields(
                     env_prefix,
                     missing,
                 );
-            } else {
-                // The entire config struct is missing - report it
+            } else if !config_schema.optional_root() {
+                // The entire required config struct is missing - report it.
+                // Optional config roots are allowed to be absent and deserialize as None.
                 missing.push(MissingFieldInfo {
                     field_name: field_name.to_string(),
                     field_path: field_name.to_string(),
@@ -1520,14 +1522,8 @@ mod tests {
             ),
             "main"
         );
-        assert_eq!(
-            normalize_program_name("main-b36e7ccd11ac5f87.exe"),
-            "main"
-        );
-        assert_eq!(
-            normalize_program_name("main-b36e7ccd11ac5f87.EXE"),
-            "main"
-        );
+        assert_eq!(normalize_program_name("main-b36e7ccd11ac5f87.exe"), "main");
+        assert_eq!(normalize_program_name("main-b36e7ccd11ac5f87.EXE"), "main");
 
         // Test with just binary name and hash
         assert_eq!(normalize_program_name("main-138217976bbdb088"), "main");

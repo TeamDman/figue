@@ -1,8 +1,29 @@
+ATTENTION: `teamy-figue` is a fork of `figue`; unless you specifically need the TeamDman fork behavior below, you probably want the upstream crate instead.
+
+I am publishing this fork so I can publish `teamy-mft`, which depends on fork-specific behavior that is not available in upstream `figue`.
+
+Notable differences in this fork include:
+
+- first-class long-form CLI flag aliases for named args via `#[facet(args::long_alias = "...")]`
+- schema-driven `to_args` support and roundtrip helpers
+- arbitrary-based test helpers and default arbitrary test configs
+- fixes for transparent CLI args and `to_args` roundtrips
+- richer help UX, including `help` pseudo-commands, recursive help listing, and implementation/source-file hints in help output
+- Windows-oriented fixes around program-name normalization and snapshot behavior
+
+The canonical maintained list lives in [docs/content/guide/fork-differences.md](docs/content/guide/fork-differences.md).
+
+Versioning policy:
+
+- `teamy-figue` uses its own semver.
+- The fork stays one major version ahead of the upstream `figue` major.
+- The exact upstream base is recorded in `Cargo.toml` under `workspace.metadata.teamy.upstream_figue`.
+
 # figue
 
-[![crates.io](https://img.shields.io/crates/v/figue.svg)](https://crates.io/crates/figue)
-[![documentation](https://docs.rs/figue/badge.svg)](https://docs.rs/figue)
-[![MIT/Apache-2.0 licensed](https://img.shields.io/crates/l/figue.svg)](LICENSE-MIT)
+[![crates.io](https://img.shields.io/crates/v/teamy-figue.svg)](https://crates.io/crates/teamy-figue)
+[![documentation](https://docs.rs/teamy-figue/badge.svg)](https://docs.rs/teamy-figue)
+[![MIT/Apache-2.0 licensed](https://img.shields.io/crates/l/teamy-figue.svg)](LICENSE-MIT)
 
 figue (pronounced 'fig', like the fruit) provides configuration parsing from
 CLI arguments, environment variables, and config files, a bit like
@@ -34,6 +55,18 @@ Ok(())
 ```
 
 The entry point of figue is [`builder`] — let yourself be guided from there.
+
+## Documentation
+
+- **Upstream guide & reference**: <https://figue.bearcove.eu> — task-oriented
+  guide, copy-paste recipes, and an exhaustive reference (attributes, grammar,
+  merge rules, error catalog).
+- **Fork API docs**: <https://docs.rs/teamy-figue>
+- **Fork differences**: [docs/content/guide/fork-differences.md](docs/content/guide/fork-differences.md) — intentional Teamy fork behavior that differs from upstream
+
+The site sources live in `docs/` and are built with
+[dodeca](https://github.com/bearcove/dodeca) (`ddc serve` locally, deployed to
+GitHub Pages on push to `main`).
 
 ## Color
 

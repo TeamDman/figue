@@ -1,12 +1,38 @@
 ---
 source: crates/figue/tests/integration/subcommand_errors.rs
-expression: "$crate :: common :: strip_ansi(& err.to_string())"
+assertion_line: 59
+expression: "strip_ansi_escapes :: strip_str(& err.to_string())"
 ---
+main init
+
+Initialize a new project
+
+USAGE:
+    main init [OPTIONS] <NAME>
+
+ARGUMENTS:
+        <NAME>
+            Project name (creates directory with this name)
+
+OPTIONS:
+    -h, --help
+            Show help message and exit.
+        --html-help
+            Open HTML help in the browser and exit.
+    -V, --version
+            Show version and exit.
+        --completions <bash,zsh,fish>
+            Generate shell completions.
+        --export-jsonschemas <DIR>
+            Export JSON Schema files for all config roots.
+    -t, --template <STRING>
+            Template to use (skips interactive selection)
+
+
 Error: missing required argument
-   ╭─[ <suggestion>:1:6 ]
+   ╭─[ <usage>:1:6 ]
    │
  1 │ init <name>
    │      ───┬──  
    │         ╰──── Project name (creates directory with this name)
 ───╯
-Note: Run with --help for usage information.
