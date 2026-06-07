@@ -104,6 +104,23 @@ facet::define_attr_grammar! {
         /// }
         /// ```
         EnvAlias(&'static str),
+        /// Specifies an additional long-form CLI flag name for a named argument.
+        ///
+        /// This allows a field to keep one canonical long flag while accepting
+        /// compatibility aliases on the CLI. Multiple aliases can be specified
+        /// by using the attribute multiple times.
+        ///
+        /// Usage: `#[facet(args::long_alias = "drive-letter-pattern")]`
+        ///
+        /// Example:
+        /// ```ignore
+        /// #[derive(Facet)]
+        /// struct Args {
+        ///     #[facet(args::named, rename = "drive", args::long_alias = "drive-letter-pattern")]
+        ///     drive: Option<String>,
+        /// }
+        /// ```
+        LongAlias(&'static str),
         /// Enables environment variable substitution for this field.
         ///
         /// When enabled, `${VAR}` patterns in the field's value will be replaced

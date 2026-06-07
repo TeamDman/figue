@@ -180,6 +180,20 @@ fn extract_env_aliases(field: &Field) -> Vec<String> {
     aliases
 }
 
+/// Extract all long_alias values from a field's `#[facet(args::long_alias = "...")]`
+/// attributes, normalized to kebab-case CLI flag names.
+fn extract_long_aliases(field: &Field) -> Vec<String> {
+    let mut aliases = Vec::new();
+    for field_attr in field.attributes {
+        if field_attr.ns == Some("args") && field_attr.key == "long_alias" {
+            if let Some(s) = field_attr.get_as::<&str>() {
+                aliases.push(s.to_kebab_case());
+            }
+        }
+    }
+    aliases
+}
+
 /// Check if a field has `#[facet(args::env_subst)]` attribute.
 fn has_env_subst(field: &Field) -> bool {
     field.has_attr(Some("args"), "env_subst")
@@ -742,6 +756,40 @@ fn short_from_variant(variant: &Variant) -> Option<char> {
         })
 }
 
+fn check_long_alias_conflicts(
+    seen_long: &mut HashMap<String, SchemaErrorContext>,
+    aliases: &[String],
+    field_ctx: &SchemaErrorContext,
+    field_name: &str,
+) -> Result<(), SchemaError> {
+    let mut seen_local: HashMap<&str, ()> = HashMap::new();
+
+    for alias in aliases {
+        if seen_local.insert(alias.as_str(), ()).is_some() {
+            return Err(SchemaError::new(
+                field_ctx.clone(),
+                format!("duplicate long alias `--{alias}` on `{field_name}`"),
+            )
+            .with_primary_label("alias repeated here"));
+        }
+
+        if let Some(existing_ctx) = seen_long.get(alias) {
+            return Err(SchemaError::new(
+                existing_ctx.clone(),
+                format!("duplicate flag `--{alias}`"),
+            )
+            .with_primary_label(format!("`--{alias}` first defined here"))
+            .with_label(field_ctx.clone(), "alias defined again here"));
+        }
+    }
+
+    for alias in aliases {
+        seen_long.insert(alias.clone(), field_ctx.clone());
+    }
+
+    Ok(())
+}
+
 fn variant_fields_for_schema(variant: &Variant) -> &'static [Field] {
     let fields = variant.data.fields;
     if is_flattened_tuple_variant(variant) {
@@ -839,6 +887,7 @@ fn arg_level_from_fields_with_prefix(
                     let value = value_schema_from_config_value_schema(config_field_schema.value());
                     let arg = ArgSchema {
                         name: name.clone(),
+                        long_aliases: Vec::new(),
                         insertion_path: vec![config_field_name.clone(), name.clone()],
                         docs: config_field_schema.docs().clone(),
                         kind: ArgKind::Named {
@@ -898,15 +947,17 @@ fn arg_level_from_fields_with_prefix(
 
             // Merge the inner args into our args (checking for conflicts)
             for (name, arg) in inner.args {
-                if let Some(existing_ctx) = seen_long.get(&name) {
-                    return Err(SchemaError::new(
-                        existing_ctx.clone(),
-                        format!("duplicate flag `--{}` (from flattened field)", name),
-                    )
-                    .with_primary_label("first defined here")
-                    .with_label(field_ctx.clone(), "flattened here"));
+                for long_name in arg.long_flag_names() {
+                    if let Some(existing_ctx) = seen_long.get(&long_name) {
+                        return Err(SchemaError::new(
+                            existing_ctx.clone(),
+                            format!("duplicate flag `--{long_name}` (from flattened field)"),
+                        )
+                        .with_primary_label("first defined here")
+                        .with_label(field_ctx.clone(), "flattened here"));
+                    }
+                    seen_long.insert(long_name, field_ctx.clone());
                 }
-                seen_long.insert(name.clone(), field_ctx.clone());
 
                 if let ArgKind::Named { short: Some(c), .. } = &arg.kind {
                     if let Some(existing_ctx) = seen_short.get(c) {
@@ -1100,6 +1151,17 @@ fn arg_level_from_fields_with_prefix(
             None
         };
         let counted = field.has_attr(Some("args"), "counted");
+        let long_aliases = extract_long_aliases(field);
+
+        if !long_aliases.is_empty() && (is_positional || is_subcommand || is_config_field(field)) {
+            return Err(SchemaError::new(
+                field_ctx,
+                format!(
+                    "field `{}` uses args::long_alias on a non-named argument",
+                    field.name
+                ),
+            ));
+        }
 
         let kind = if is_positional {
             ArgKind::Positional
@@ -1144,6 +1206,7 @@ fn arg_level_from_fields_with_prefix(
                 .with_label(field_ctx.clone(), "defined again here"));
             }
             seen_long.insert(long.clone(), field_ctx.clone());
+            check_long_alias_conflicts(&mut seen_long, &long_aliases, &field_ctx, field.name)?;
 
             if let Some(c) = short {
                 if let Some(existing_ctx) = seen_short.get(&c) {
@@ -1188,6 +1251,7 @@ fn arg_level_from_fields_with_prefix(
 
         let arg = ArgSchema {
             name: effective_name.clone(),
+            long_aliases,
             insertion_path: vec![effective_name.clone()],
             docs,
             kind,

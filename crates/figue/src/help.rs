@@ -1256,16 +1256,28 @@ fn arg_help_names(arg: &ArgSchema) -> Vec<String> {
         names.push(format!("-{c},"));
     }
 
+    let long_names = arg.long_flag_names().collect::<Vec<_>>();
+    for (idx, long_name) in long_names.iter().enumerate() {
+        let mut rendered = render_long_help_name(arg, long_name);
+        if idx + 1 < long_names.len() {
+            rendered.push(',');
+        }
+        names.push(rendered);
+    }
+    names
+}
+
+fn render_long_help_name(arg: &ArgSchema, long_name: &str) -> String {
     let is_bool = arg.value().inner_if_option().is_bool();
     let is_counted = arg.kind().is_counted();
-    let mut long = if is_bool {
+    let mut rendered = if is_bool {
         if arg.default().map(config_value_summary).as_deref() == Some("false") {
-            format!("--{}", arg.name().to_kebab_case())
+            format!("--{long_name}")
         } else {
-            format!("--[no-]{}", arg.name().to_kebab_case())
+            format!("--[no-]{long_name}")
         }
     } else {
-        format!("--{}", arg.name().to_kebab_case())
+        format!("--{long_name}")
     };
 
     if !is_counted && !arg.value().is_bool() {
@@ -1277,11 +1289,11 @@ fn arg_help_names(arg: &ArgSchema) -> Vec<String> {
             Some(arg.value().type_identifier().to_uppercase())
         };
         if let Some(placeholder) = placeholder {
-            long.push_str(&format!(" <{placeholder}>"));
+            rendered.push_str(&format!(" <{placeholder}>"));
         }
     }
-    names.push(long);
-    names
+
+    rendered
 }
 
 fn render_code_tokens(out: &mut String, text: &str) {
@@ -2687,7 +2699,8 @@ fn remove_shadowed_named_flags(flags: &mut Vec<ArgSchema>, args: &ArgLevelSchema
 }
 
 fn arg_schemas_conflict(left: &ArgSchema, right: &ArgSchema) -> bool {
-    left.name() == right.name()
+    left.long_flag_names()
+        .any(|name| right.matches_long_flag(&name))
         || matches!(
             (left.kind().short(), right.kind().short()),
             (Some(left_short), Some(right_short)) if left_short == right_short
@@ -2721,32 +2734,16 @@ fn write_arg_help(out: &mut String, arg: &ArgSchema, config: &HelpConfig) {
             format!("<{}>", name.to_uppercase()).if_supports_color(Stdout, |text| text.green())
         ));
     } else {
-        let is_bool = arg.value().inner_if_option().is_bool();
-        let bool_default_is_false =
-            arg.default().map(config_value_summary).as_deref() == Some("false");
-        let flag_str = if is_bool && bool_default_is_false {
-            format!("--{}", name.to_kebab_case())
-        } else if is_bool {
-            format!("--[no-]{}", name.to_kebab_case())
-        } else {
-            format!("--{}", name.to_kebab_case())
-        };
+        let long_names = arg.long_flag_names().collect::<Vec<_>>();
+        let flag_str = long_names
+            .iter()
+            .map(|long_name| render_long_help_name(arg, long_name))
+            .collect::<Vec<_>>()
+            .join(", ");
         out.push_str(&format!(
             "{}",
             flag_str.if_supports_color(Stdout, |text| text.green())
         ));
-
-        // Show value placeholder for non-bool, non-counted types
-        if !is_counted && !arg.value().is_bool() {
-            let placeholder = if let Some(desc) = arg.label() {
-                desc.to_uppercase()
-            } else if let Some(variants) = arg.value().inner_if_option().enum_variants() {
-                variants.join(",")
-            } else {
-                arg.value().type_identifier().to_uppercase()
-            };
-            out.push_str(&format!(" <{}>", placeholder));
-        }
     }
 
     // Doc comment
@@ -2813,6 +2810,17 @@ mod tests {
         common: CommonArgs,
     }
 
+    #[derive(Facet)]
+    struct ArgsWithLongAlias {
+        /// Drive selector
+        #[facet(
+            args::named,
+            rename = "drive",
+            args::long_alias = "drive-letter-pattern"
+        )]
+        drive_letter_pattern: Option<String>,
+    }
+
     #[test]
     fn test_flatten_args_appear_in_help() {
         let schema = Schema::from_shape(ArgsWithFlatten::SHAPE).unwrap();
@@ -2850,6 +2858,17 @@ mod tests {
         assert!(
             help.contains("quiet mode"),
             "help should contain quiet field doc"
+        );
+    }
+
+    #[test]
+    fn test_help_shows_long_aliases_after_canonical_name() {
+        let schema = Schema::from_shape(ArgsWithLongAlias::SHAPE).unwrap();
+        let help = generate_help_for_subcommand(&schema, &[], &HelpConfig::default());
+
+        assert!(
+            help.contains("--drive <STRING>, --drive-letter-pattern <STRING>"),
+            "help should show canonical long flag followed by aliases: {help}"
         );
     }
 

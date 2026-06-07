@@ -463,36 +463,16 @@ impl<'a> ParseContext<'a> {
                 );
                 self.index += 1;
             } else {
-                let all_flags: Vec<&str> = level
-                    .args()
-                    .iter()
-                    .filter_map(|(name, schema)| {
-                        if matches!(schema.kind(), ArgKind::Named { .. }) {
-                            Some(name.as_str())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                let suggestion = crate::suggest::suggest_flag(flag_name, all_flags);
+                let all_flags = self.visible_long_flag_names(level);
+                let suggestion =
+                    crate::suggest::suggest_flag(flag_name, all_flags.iter().map(|s| s.as_str()));
                 self.emit_error(format!("unknown flag: --{}{}", flag_name, suggestion));
                 self.index += 1;
             }
         } else {
-            // Collect all available flag names for suggestion
-            let all_flags: Vec<&str> = level
-                .args()
-                .iter()
-                .filter_map(|(name, schema)| {
-                    // Only suggest named flags
-                    if matches!(schema.kind(), ArgKind::Named { .. }) {
-                        Some(name.as_str())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            let suggestion = crate::suggest::suggest_flag(flag_name, all_flags);
+            let all_flags = self.visible_long_flag_names(level);
+            let suggestion =
+                crate::suggest::suggest_flag(flag_name, all_flags.iter().map(|s| s.as_str()));
             self.emit_error(format!("unknown flag: --{}{}", flag_name, suggestion));
             self.index += 1;
         }
@@ -1296,6 +1276,42 @@ impl<'a> ParseContext<'a> {
             }
         }
         None
+    }
+
+    /// Collect all visible long-form flag names at the current parse point.
+    ///
+    /// This includes both canonical names and aliases from the current level
+    /// plus any parent levels that can accept bubbled-up flags.
+    fn visible_long_flag_names(&self, level: &ArgLevelSchema) -> Vec<String> {
+        let mut flags = Vec::new();
+
+        let mut push_unique = |name: String| {
+            if !flags.iter().any(|existing| existing == &name) {
+                flags.push(name);
+            }
+        };
+
+        for (_effective_name, schema) in level.args().iter() {
+            if !matches!(schema.kind(), ArgKind::Named { .. }) {
+                continue;
+            }
+            for long_name in schema.long_flag_names() {
+                push_unique(long_name);
+            }
+        }
+
+        for parent in self.parent_stack.iter().rev() {
+            for (_effective_name, schema) in parent.args.args().iter() {
+                if !matches!(schema.kind(), ArgKind::Named { .. }) {
+                    continue;
+                }
+                for long_name in schema.long_flag_names() {
+                    push_unique(long_name);
+                }
+            }
+        }
+
+        flags
     }
 
     /// If the level expects subcommands, try to suggest a similar subcommand name.
@@ -2632,12 +2648,49 @@ mod tests {
         output: String,
     }
 
+    #[derive(Facet)]
+    struct AliasedLongFlags {
+        #[facet(
+            args::named,
+            rename = "drive",
+            args::long_alias = "drive-letter-pattern"
+        )]
+        drive_letter_pattern: bool,
+
+        #[facet(args::named, rename = "log-path", args::long_alias = "log-file")]
+        log_path: Option<String>,
+    }
+
     #[test]
     fn test_cv_renamed_field_uses_effective_name() {
         // The CLI flag is --output-dir, and the ConfigValue key is "output-dir"
         assert_parses_to::<RenamedFields>(
             &["--output-dir", "/tmp"],
             cv::object([("output-dir", cv::string("/tmp", "--output-dir"))]),
+        );
+    }
+
+    #[test]
+    fn test_cv_long_alias_bool_uses_canonical_field() {
+        assert_parses_to::<AliasedLongFlags>(
+            &["--drive-letter-pattern"],
+            cv::object([("drive", cv::bool(true, "--drive-letter-pattern"))]),
+        );
+    }
+
+    #[test]
+    fn test_cv_long_alias_value_uses_canonical_field() {
+        assert_parses_to::<AliasedLongFlags>(
+            &["--log-file", "/tmp/app.log"],
+            cv::object([("log-path", cv::string("/tmp/app.log", "--log-file"))]),
+        );
+    }
+
+    #[test]
+    fn test_long_alias_unknown_flag_suggestion_uses_aliases() {
+        assert_diagnostic_contains::<AliasedLongFlags>(
+            &["--drive-letter-patern"],
+            "Did you mean '--drive-letter-pattern'?",
         );
     }
 
@@ -3165,6 +3218,19 @@ mod tests {
     }
 
     #[derive(Facet)]
+    struct ParentWithAliasedGlobalFlag {
+        #[facet(
+            args::named,
+            rename = "drive",
+            args::long_alias = "drive-letter-pattern"
+        )]
+        drive_letter_pattern: bool,
+
+        #[facet(args::subcommand)]
+        command: ChildCommand,
+    }
+
+    #[derive(Facet)]
     #[repr(u8)]
     #[allow(dead_code)]
     enum ChildCommand {
@@ -3226,6 +3292,17 @@ mod tests {
             &["--verbose", "build"],
             cv::object([
                 ("verbose", cv::bool(true, "--verbose")),
+                ("command", cv::enumv("Build", [])),
+            ]),
+        );
+    }
+
+    #[test]
+    fn test_adoption_long_alias_after_subcommand_bubbles_up() {
+        assert_parses_to::<ParentWithAliasedGlobalFlag>(
+            &["build", "--drive-letter-pattern"],
+            cv::object([
+                ("drive", cv::bool(true, "--drive-letter-pattern")),
                 ("command", cv::enumv("Build", [])),
             ]),
         );
@@ -3615,6 +3692,14 @@ mod tests {
                 ("verbose", cv::bool(false, "--no-verbose")),
                 ("command", cv::enumv("Build", [])),
             ]),
+        );
+    }
+
+    #[test]
+    fn test_no_prefix_alias_negates_bool() {
+        assert_parses_to::<AliasedLongFlags>(
+            &["--no-drive-letter-pattern"],
+            cv::object([("drive", cv::bool(false, "--no-drive-letter-pattern"))]),
         );
     }
 }

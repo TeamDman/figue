@@ -113,13 +113,21 @@ fn generate_bash_function(
     // Build flags string
     if !flags.is_empty() {
         out.push_str("    local flags=\"");
-        for (i, flag) in flags.iter().enumerate() {
-            if i > 0 {
-                out.push(' ');
+        let mut first = true;
+        for flag in &flags {
+            for long_name in std::iter::once(&flag.long).chain(flag.aliases.iter()) {
+                if !first {
+                    out.push(' ');
+                }
+                first = false;
+                out.push_str(&format!("--{long_name}"));
             }
-            out.push_str(&format!("--{}", flag.long));
             if let Some(short) = flag.short {
-                out.push_str(&format!(" -{short}"));
+                if !first {
+                    out.push(' ');
+                }
+                first = false;
+                out.push_str(&format!("-{short}"));
             }
         }
         out.push_str("\"\n");
@@ -146,7 +154,10 @@ fn generate_bash_function(
     if !value_flags.is_empty() {
         out.push_str("\n    case \"$prev\" in\n");
         for flag in &value_flags {
-            let mut cases = vec![format!("--{}", flag.long)];
+            let mut cases = std::iter::once(&flag.long)
+                .chain(flag.aliases.iter())
+                .map(|long_name| format!("--{long_name}"))
+                .collect::<Vec<_>>();
             if let Some(short) = flag.short {
                 cases.push(format!("-{short}"));
             }
@@ -177,7 +188,10 @@ fn generate_bash_function(
         if !value_flags.is_empty() {
             out.push_str("                case \"${words[i]}\" in\n");
             for flag in &value_flags {
-                let mut cases = vec![format!("--{}", flag.long)];
+                let mut cases = std::iter::once(&flag.long)
+                    .chain(flag.aliases.iter())
+                    .map(|long_name| format!("--{long_name}"))
+                    .collect::<Vec<_>>();
                 if let Some(short) = flag.short {
                     cases.push(format!("-{short}"));
                 }
@@ -319,19 +333,31 @@ fn generate_zsh_function(
 
         if let Some(short) = flag.short {
             // Short and long are mutually exclusive in completion
+            let all_longs = std::iter::once(&flag.long)
+                .chain(flag.aliases.iter())
+                .map(|long_name| format!("--{long_name}"))
+                .collect::<Vec<_>>()
+                .join(" ");
             out.push_str(&format!(
-                "        '(-{short} --{long})'-{short}'[{escaped_desc}]{value_spec}'\n",
-                long = flag.long,
+                "        '(-{short} {all_longs})'-{short}'[{escaped_desc}]{value_spec}'\n",
             ));
-            out.push_str(&format!(
-                "        '(-{short} --{long})'--{long}'[{escaped_desc}]{value_spec}'\n",
-                long = flag.long,
-            ));
-        } else {
-            out.push_str(&format!(
-                "        '--{long}[{escaped_desc}]{value_spec}'\n",
-                long = flag.long,
-            ));
+        }
+
+        for long_name in std::iter::once(&flag.long).chain(flag.aliases.iter()) {
+            if let Some(short) = flag.short {
+                let all_longs = std::iter::once(&flag.long)
+                    .chain(flag.aliases.iter())
+                    .map(|name| format!("--{name}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                out.push_str(&format!(
+                    "        '(-{short} {all_longs})'--{long_name}'[{escaped_desc}]{value_spec}'\n",
+                ));
+            } else {
+                out.push_str(&format!(
+                    "        '--{long_name}[{escaped_desc}]{value_spec}'\n",
+                ));
+            }
         }
     }
     out.push_str("    )\n\n");
@@ -452,28 +478,35 @@ fn generate_fish_level(out: &mut String, args: &ArgLevelSchema, program_name: &s
     // Add flag completions for this level
     for flag in &flags {
         let desc = flag.doc.as_deref().unwrap_or("");
-        out.push_str(&format!("complete -c {program_name}"));
+        let escaped_desc = desc.replace('\'', "'\\''");
+        for (idx, long_name) in std::iter::once(&flag.long)
+            .chain(flag.aliases.iter())
+            .enumerate()
+        {
+            out.push_str(&format!("complete -c {program_name}"));
 
-        // Add condition if we're in a subcommand
-        if !path.is_empty() {
-            out.push_str(&format!(" -n '{condition}'"));
-        }
+            // Add condition if we're in a subcommand
+            if !path.is_empty() {
+                out.push_str(&format!(" -n '{condition}'"));
+            }
 
-        if let Some(short) = flag.short {
-            out.push_str(&format!(" -s {short}"));
-        }
-        out.push_str(&format!(" -l {}", flag.long));
+            if idx == 0 {
+                if let Some(short) = flag.short {
+                    out.push_str(&format!(" -s {short}"));
+                }
+            }
+            out.push_str(&format!(" -l {long_name}"));
 
-        // If flag takes a value, require an argument
-        if flag.takes_value {
-            out.push_str(" -r");
-        }
+            // If flag takes a value, require an argument
+            if flag.takes_value {
+                out.push_str(" -r");
+            }
 
-        if !desc.is_empty() {
-            let escaped_desc = desc.replace('\'', "'\\''");
-            out.push_str(&format!(" -d '{escaped_desc}'"));
+            if !desc.is_empty() {
+                out.push_str(&format!(" -d '{escaped_desc}'"));
+            }
+            out.push('\n');
         }
-        out.push('\n');
     }
 
     // Add subcommand completions
@@ -528,6 +561,7 @@ fn generate_fish_subcommands(
 
 struct FlagInfo {
     long: String,
+    aliases: Vec<String>,
     short: Option<char>,
     doc: Option<String>,
     takes_value: bool,
@@ -570,6 +604,7 @@ fn arg_to_flag(name: &str, arg: &ArgSchema) -> FlagInfo {
     FlagInfo {
         // Use kebab-case for the CLI flag name
         long: name.to_kebab_case(),
+        aliases: arg.long_aliases().to_vec(),
         short: arg.kind().short(),
         doc: arg.docs().summary().map(|s| s.trim().to_string()),
         takes_value,
@@ -657,6 +692,17 @@ mod tests {
         output_file: String,
     }
 
+    #[derive(Facet)]
+    struct ArgsWithLongAlias {
+        /// Drive selector
+        #[facet(
+            args::named,
+            rename = "drive",
+            args::long_alias = "drive-letter-pattern"
+        )]
+        drive_letter_pattern: Option<String>,
+    }
+
     #[test]
     fn test_rename_respected_in_completions() {
         let schema = Schema::from_shape(ArgsWithRename::SHAPE).unwrap();
@@ -681,6 +727,24 @@ mod tests {
             !completions.contains("--output-file"),
             "completions should not show --output-file (was renamed to --out)"
         );
+    }
+
+    #[test]
+    fn test_long_aliases_appear_in_bash_completions() {
+        let schema = Schema::from_shape(ArgsWithLongAlias::SHAPE).unwrap();
+        let completions = generate_completions_for_schema(&schema, Shell::Bash, "myapp");
+
+        assert!(completions.contains("--drive"));
+        assert!(completions.contains("--drive-letter-pattern"));
+    }
+
+    #[test]
+    fn test_long_aliases_appear_in_fish_completions() {
+        let schema = Schema::from_shape(ArgsWithLongAlias::SHAPE).unwrap();
+        let completions = generate_completions_for_schema(&schema, Shell::Fish, "myapp");
+
+        assert!(completions.contains(" -l drive"));
+        assert!(completions.contains(" -l drive-letter-pattern"));
     }
 
     /// Subcommand enum with renamed variant

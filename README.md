@@ -4,11 +4,14 @@ I am publishing this fork so I can publish `teamy-mft`, which depends on fork-sp
 
 Notable differences in this fork include:
 
+- first-class long-form CLI flag aliases for named args via `#[facet(args::long_alias = "...")]`
 - schema-driven `to_args` support and roundtrip helpers
 - arbitrary-based test helpers and default arbitrary test configs
 - fixes for transparent CLI args and `to_args` roundtrips
 - richer help UX, including `help` pseudo-commands, recursive help listing, and implementation/source-file hints in help output
 - Windows-oriented fixes around program-name normalization and snapshot behavior
+
+The canonical maintained list lives in [docs/content/guide/fork-differences.md](docs/content/guide/fork-differences.md).
 
 # figue
 
@@ -53,6 +56,7 @@ The entry point of figue is [`builder`] — let yourself be guided from there.
   guide, copy-paste recipes, and an exhaustive reference (attributes, grammar,
   merge rules, error catalog).
 - **Fork API docs**: <https://docs.rs/teamy-figue>
+- **Fork differences**: [docs/content/guide/fork-differences.md](docs/content/guide/fork-differences.md) — intentional Teamy fork behavior that differs from upstream
 
 The site sources live in `docs/` and are built with
 [dodeca](https://github.com/bearcove/dodeca) (`ddc serve` locally, deployed to

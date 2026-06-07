@@ -12,11 +12,13 @@ use indexmap::IndexMap;
 
 use crate::path::Path;
 
-/// Wrapper around args IndexMap that provides kebab-case lookup.
+/// Wrapper around args IndexMap that provides kebab-case canonical/alias lookup.
 ///
 /// Schema stores field names as effective names (snake_case or renamed).
-/// CLI flags come in as kebab-case. This wrapper converts schema keys to
-/// kebab-case during lookup so `--deep-flag` matches `deep_flag` in schema.
+/// CLI flags come in as kebab-case. This wrapper matches both the canonical
+/// kebab-case name and any configured long-form aliases so `--deep-flag`
+/// matches `deep_flag` in schema, and `--old-name` can still resolve to the
+/// same field when declared as an alias.
 pub struct Args<'a> {
     inner: &'a IndexMap<String, ArgSchema, RandomState>,
 }
@@ -27,7 +29,7 @@ impl<'a> Args<'a> {
     pub fn get(&self, flag_name: &str) -> Option<(&'a String, &'a ArgSchema)> {
         self.inner
             .iter()
-            .find(|(key, _)| key.to_kebab_case() == flag_name)
+            .find(|(_, schema)| schema.matches_long_flag(flag_name))
     }
 
     /// Iterate over all args with their effective names.
@@ -310,6 +312,11 @@ pub struct Subcommand {
 pub struct ArgSchema {
     /// Argument name / effective name (rename or field name).
     name: String,
+
+    /// Additional accepted long-form CLI flag names for this argument.
+    ///
+    /// These are stored in kebab-case without the leading `--`.
+    long_aliases: Vec<String>,
 
     /// Path where this argument writes in ConfigValue.
     ///
@@ -666,6 +673,36 @@ impl ArgSchema {
     /// Get the argument kind (positional or named).
     pub fn kind(&self) -> &ArgKind {
         &self.kind
+    }
+
+    /// Get the canonical long-form CLI flag name for this argument.
+    ///
+    /// Returns `None` for positional arguments.
+    pub fn long_name(&self) -> Option<String> {
+        match self.kind() {
+            ArgKind::Named { .. } => Some(self.name.to_kebab_case()),
+            ArgKind::Positional => None,
+        }
+    }
+
+    /// Get the additional long-form CLI flag aliases for this argument.
+    pub fn long_aliases(&self) -> &[String] {
+        &self.long_aliases
+    }
+
+    /// Iterate over all accepted long-form CLI flag names for this argument.
+    ///
+    /// The canonical name is always yielded first, followed by any aliases.
+    pub fn long_flag_names(&self) -> impl Iterator<Item = String> + '_ {
+        self.long_name()
+            .into_iter()
+            .chain(self.long_aliases.iter().cloned())
+    }
+
+    /// Check whether this argument accepts the given long-form CLI flag name.
+    pub fn matches_long_flag(&self, flag_name: &str) -> bool {
+        self.long_name().as_deref() == Some(flag_name)
+            || self.long_aliases.iter().any(|alias| alias == flag_name)
     }
 
     /// Get the value schema.

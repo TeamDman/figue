@@ -82,6 +82,7 @@ runtime reflection cost.
 ## Quick links
 
 - [Getting Started](@/guide/getting-started.md) — install figue and parse your first argument
+- [Fork Differences](@/guide/fork-differences.md) — intentional Teamy fork behavior that differs from upstream
 - [Layered Configuration](@/guide/layered-configuration.md) — combine CLI, env, and files
 - [Attribute Reference](@/reference/attributes.md) — every `#[facet(args::…)]` attribute
 - [GitHub](https://github.com/TeamDman/figue) — source and issues

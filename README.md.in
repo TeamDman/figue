@@ -41,6 +41,7 @@ The entry point of figue is [`builder`] — let yourself be guided from there.
   guide, copy-paste recipes, and an exhaustive reference (attributes, grammar,
   merge rules, error catalog).
 - **Fork API docs**: <https://docs.rs/teamy-figue>
+- **Fork differences**: [docs/content/guide/fork-differences.md](docs/content/guide/fork-differences.md) — intentional Teamy fork behavior that differs from upstream
 
 The site sources live in `docs/` and are built with
 [dodeca](https://github.com/bearcove/dodeca) (`ddc serve` locally, deployed to

@@ -1878,10 +1878,7 @@ mod tests {
                     text.contains("test-app"),
                     "help should contain program name"
                 );
-                assert!(
-                    text.contains("--help"),
-                    "help should mention --help flag"
-                );
+                assert!(text.contains("--help"), "help should mention --help flag");
             }
             other => panic!("expected DriverError::Help, got {:?}", other),
         }
