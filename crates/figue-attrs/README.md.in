@@ -1,12 +1,12 @@
-# figue-attrs
+# teamy-figue-attrs
 
-[![crates.io](https://img.shields.io/crates/v/figue-attrs.svg)](https://crates.io/crates/figue-attrs)
-[![documentation](https://docs.rs/figue-attrs/badge.svg)](https://docs.rs/figue-attrs)
-[![MIT/Apache-2.0 licensed](https://img.shields.io/crates/l/figue-attrs.svg)](../../LICENSE-MIT)
+[![crates.io](https://img.shields.io/crates/v/teamy-figue-attrs.svg)](https://crates.io/crates/teamy-figue-attrs)
+[![documentation](https://docs.rs/teamy-figue-attrs/badge.svg)](https://docs.rs/teamy-figue-attrs)
+[![MIT/Apache-2.0 licensed](https://img.shields.io/crates/l/teamy-figue-attrs.svg)](../../LICENSE-MIT)
 
-Attribute macros for [figue](https://crates.io/crates/figue) CLI argument parsing.
+Attribute macros for [teamy-figue](https://crates.io/crates/teamy-figue) CLI argument parsing.
 
-**Note:** This is an internal crate. Users should depend on `figue` directly, which
+**Note:** This is an internal crate. Users should depend on `teamy-figue` directly, which
 re-exports everything from this crate.
 
 ## Why a separate crate?
@@ -15,7 +15,7 @@ This crate exists to work around Rust's restriction on accessing macro-expanded
 `#[macro_export]` macros by absolute paths within the same crate
 ([rust-lang/rust#52234](https://github.com/rust-lang/rust/issues/52234)).
 
-By defining the attribute grammar macros in a separate crate, the main `figue` crate
+By defining the attribute grammar macros in a separate crate, the main `teamy-figue` crate
 can reference them via an external crate path.
 
 ## License
