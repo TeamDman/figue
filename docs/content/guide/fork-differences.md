@@ -17,8 +17,19 @@ note that the fork no longer diverges there.
 
 ```toml
 [dependencies]
-figue = { package = "teamy-figue", version = "4" }
+figue = { package = "teamy-figue", version = "5" }
 ```
+
+## Versioning policy
+
+- `teamy-figue` uses Teamy-controlled semver rather than mirroring upstream
+  `figue` release numbers.
+- The fork stays one major version ahead of the upstream `figue` major to make
+  the distinction obvious at a glance.
+- The exact upstream base for a release is recorded in the workspace metadata
+  at `workspace.metadata.teamy.upstream_figue`.
+- Breaking changes for `teamy-figue` users still require a `teamy-figue` major
+  bump, regardless of the upstream base.
 
 ## Behavior differences
 

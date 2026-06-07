@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-06-06
+
+### Added
+
+- first-class long-form CLI flag aliases for named args via `args::long_alias`
+
+### Changed
+
+- document Teamy fork differences in the guide
+- adopt Teamy-controlled semver with upstream `figue` base tracked in workspace metadata
+
 ## [4.0.3](https://github.com/bearcove/figue/compare/figue-v4.0.2...figue-v4.0.3) - 2026-05-18
 
 ### Other

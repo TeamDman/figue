@@ -13,6 +13,12 @@ Notable differences in this fork include:
 
 The canonical maintained list lives in [docs/content/guide/fork-differences.md](docs/content/guide/fork-differences.md).
 
+Versioning policy:
+
+- `teamy-figue` uses its own semver.
+- The fork stays one major version ahead of the upstream `figue` major.
+- The exact upstream base is recorded in `Cargo.toml` under `workspace.metadata.teamy.upstream_figue`.
+
 # figue
 
 [![crates.io](https://img.shields.io/crates/v/teamy-figue.svg)](https://crates.io/crates/teamy-figue)

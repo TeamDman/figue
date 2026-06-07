@@ -43,6 +43,9 @@ The entry point of figue is [`builder`] — let yourself be guided from there.
 - **Fork API docs**: <https://docs.rs/teamy-figue>
 - **Fork differences**: [docs/content/guide/fork-differences.md](docs/content/guide/fork-differences.md) — intentional Teamy fork behavior that differs from upstream
 
+This fork uses its own semver; the exact upstream `figue` base is recorded in
+`Cargo.toml` under `workspace.metadata.teamy.upstream_figue`.
+
 The site sources live in `docs/` and are built with
 [dodeca](https://github.com/bearcove/dodeca) (`ddc serve` locally, deployed to
 GitHub Pages on push to `main`).

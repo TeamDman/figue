@@ -28,12 +28,12 @@ figue is built on [facet](https://facet.rs). You need both `facet` (for the
 # Cargo.toml
 [dependencies]
 facet = "0.46"
-figue = { package = "teamy-figue", version = "4" }
+figue = { package = "teamy-figue", version = "5" }
 ```
 
 (Check [crates.io/crates/teamy-figue](https://crates.io/crates/teamy-figue) for
-the current release; this fork tracks a specific `facet` version, so prefer the
-latest compatible pair.)
+the current release. `teamy-figue` uses its own semver; the exact upstream
+`figue` base is recorded in the repository metadata and fork-differences docs.)
 
 > **Doc comments become help text.** figue turns the `///` comments on your
 > fields into help descriptions. This relies on facet's `doc` feature, which is
