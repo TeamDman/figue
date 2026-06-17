@@ -13,6 +13,11 @@ Notable differences in this fork include:
 - Windows-oriented fixes around program-name normalization and snapshot behavior
 
 The canonical maintained list lives in [docs/content/guide/fork-differences.md](docs/content/guide/fork-differences.md).
+For a compact runnable summary, see
+[crates/figue/examples/teamy_fork_behaviour.rs](crates/figue/examples/teamy_fork_behaviour.rs).
+It demonstrates aliases, `to_args` roundtrips, `help list`, implementation
+source hints, Teamy-style version metadata, transparent newtypes, and custom
+fallible scalar parsing through a Facet proxy.
 
 Versioning policy:
 
@@ -64,6 +69,7 @@ The entry point of figue is [`builder`] — let yourself be guided from there.
   merge rules, error catalog).
 - **Fork API docs**: <https://docs.rs/teamy-figue>
 - **Fork differences**: [docs/content/guide/fork-differences.md](docs/content/guide/fork-differences.md) — intentional Teamy fork behavior that differs from upstream
+- **Runnable fork behavior summary**: [crates/figue/examples/teamy_fork_behaviour.rs](crates/figue/examples/teamy_fork_behaviour.rs) — a single annotated example covering the main Teamy fork extensions
 
 The site sources live in `docs/` and are built with
 [dodeca](https://github.com/bearcove/dodeca) (`ddc serve` locally, deployed to

@@ -1,5 +1,7 @@
 use facet::Facet;
 use figue::{self as args, Driver, DriverError, FigueBuiltins, ToArgs};
+use std::fmt;
+use std::str::FromStr;
 
 macro_rules! with_demo_help {
     ($builder:expr) => {
@@ -100,6 +102,58 @@ struct GlobalArgs {
         args::long_alias = "tracing-filter"
     )]
     log_filter: Option<String>,
+
+    /// Value parsed by domain logic instead of transparent inner-string mapping.
+    #[facet(args::named, default)]
+    #[cfg_attr(feature = "arbitrary", arbitrary(default))]
+    convert: Option<ConvertedValue>,
+}
+
+/// A domain value with fallible parsing.
+///
+/// Unlike `BranchSelector`, this is not `#[facet(transparent)]`. `opaque`
+/// hides the implementation fields from Facet, and the `String` proxy tells
+/// figue to deserialize a single CLI token through `TryFrom<String>` and
+/// serialize it back through `From<&ConvertedValue> for String`.
+#[derive(Clone, Debug, Eq, Facet, PartialEq)]
+#[facet(opaque, proxy = String)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+struct ConvertedValue(String);
+
+impl FromStr for ConvertedValue {
+    type Err = String;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        match input {
+            // Pretend this is expensive domain logic: database lookup, checksum
+            // validation, enum migration, unit conversion, etc.
+            "123" => Ok(Self("ABC".to_string())),
+            // Also accept the canonical display form so `ToArgs` can roundtrip
+            // an already-parsed value.
+            "ABC" => Ok(Self("ABC".to_string())),
+            _ => Err(format!("`{input}` must be `123` or canonical `ABC`")),
+        }
+    }
+}
+
+impl fmt::Display for ConvertedValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl TryFrom<String> for ConvertedValue {
+    type Error = String;
+
+    fn try_from(input: String) -> Result<Self, Self::Error> {
+        input.parse()
+    }
+}
+
+impl From<&ConvertedValue> for String {
+    fn from(value: &ConvertedValue) -> Self {
+        value.0.clone()
+    }
 }
 
 /// Top-level command surface.
@@ -222,6 +276,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     demonstrate_alias_parsing_and_to_args()?;
     demonstrate_bool_alias_negation()?;
+    demonstrate_custom_fallible_parse()?;
     demonstrate_version_metadata()?;
     demonstrate_help_extensions()?;
     demonstrate_optional_arbitrary_helpers()?;
@@ -302,6 +357,33 @@ fn demonstrate_bool_alias_negation() -> Result<(), Box<dyn std::error::Error>> {
     assert!(!parsed.color);
 
     println!("bool alias:  --no-colour negates the canonical --color flag");
+    println!();
+
+    Ok(())
+}
+
+fn demonstrate_custom_fallible_parse() -> Result<(), Box<dyn std::error::Error>> {
+    let parsed = parse_cli(&["--convert", "123", "terminal", "open"])?;
+
+    assert_eq!(
+        parsed.global.convert,
+        Some(ConvertedValue("ABC".to_string()))
+    );
+
+    let canonical = parsed.to_args_string()?;
+    assert_eq!(canonical, "--convert ABC terminal open");
+
+    let canonical_refs = canonical.split_whitespace().collect::<Vec<_>>();
+    let reparsed = parse_cli(&canonical_refs)?;
+    assert_eq!(parsed, reparsed);
+
+    assert!(
+        parse_cli(&["--convert", "nope", "terminal", "open"]).is_err(),
+        "invalid converted values should be rejected by FromStr"
+    );
+
+    println!("fromstr:     --convert 123 parses through custom fallible domain logic");
+    println!("             canonical ToArgs form: {canonical}");
     println!();
 
     Ok(())
