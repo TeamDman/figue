@@ -64,6 +64,18 @@ pub(crate) fn coerce_types_from_shape(
                 provenance: sourced.provenance.clone(),
             })
         }
+        ConfigValue::ExplicitSome(sourced) => {
+            let inner_shape = match &shape.def {
+                facet_core::Def::Option(option) => option.t,
+                _ => shape.inner.unwrap_or(shape),
+            };
+            let value = coerce_types_from_shape(&sourced.value, inner_shape);
+            ConfigValue::ExplicitSome(Sourced {
+                value: Box::new(value),
+                span: sourced.span,
+                provenance: sourced.provenance.clone(),
+            })
+        }
         ConfigValue::String(sourced) => {
             // Try to coerce string to the target type
             tracing::trace!(

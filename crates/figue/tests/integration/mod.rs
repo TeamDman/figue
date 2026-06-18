@@ -6,6 +6,7 @@ mod err;
 mod help;
 mod json_schema;
 mod layered;
+mod optional_value;
 mod schema_defaults;
 mod sequence;
 mod short_chaining;

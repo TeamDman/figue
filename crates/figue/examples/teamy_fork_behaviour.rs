@@ -46,11 +46,13 @@ fn implementation_revision() -> &'static str {
 /// - flattened global args and `FigueBuiltins`
 /// - nested subcommands
 /// - compatibility aliases for old command/flag spellings
+/// - optional-value named args that distinguish absent, bare, and valued flags
 /// - typed CLI values that can be converted back into argv with `ToArgs`
 ///
-/// The alias attributes and the schema-driven `ToArgs` helpers are the key bits
-/// that are specific to `teamy-figue` compared with the upstream `figue` base
-/// recorded in this repository's workspace metadata.
+/// The alias attributes, optional-value named args, and the schema-driven
+/// `ToArgs` helpers are the key bits that are specific to `teamy-figue`
+/// compared with the upstream `figue` base recorded in this repository's
+/// workspace metadata.
 #[derive(Facet, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 struct Cli {
@@ -102,6 +104,17 @@ struct GlobalArgs {
         args::long_alias = "tracing-filter"
     )]
     log_filter: Option<String>,
+
+    /// Parallelism mode.
+    ///
+    /// `Option<Option<T>>` on a named CLI arg is fork-specific. It gives callers
+    /// three states without a preprocessor:
+    ///
+    /// - absent flag: `None`
+    /// - bare flag: `Some(None)`, meaning "use automatic parallelism"
+    /// - valued flag: `Some(Some(n))`, meaning "use exactly n jobs"
+    #[facet(args::named, args::short = 'p')]
+    parallel: Option<Option<usize>>,
 
     /// Value parsed by domain logic instead of transparent inner-string mapping.
     #[facet(args::named, default)]
@@ -275,6 +288,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     demonstrate_alias_parsing_and_to_args()?;
+    demonstrate_optional_value_named_arg()?;
     demonstrate_bool_alias_negation()?;
     demonstrate_custom_fallible_parse()?;
     demonstrate_version_metadata()?;
@@ -332,6 +346,40 @@ fn demonstrate_alias_parsing_and_to_args() -> Result<(), Box<dyn std::error::Err
 
     println!("alias parse: legacy spellings and canonical spellings produce the same value");
     println!("to_args:     {generated}");
+    println!();
+
+    Ok(())
+}
+
+fn demonstrate_optional_value_named_arg() -> Result<(), Box<dyn std::error::Error>> {
+    let absent = parse_cli(&["terminal", "open"])?;
+    assert_eq!(absent.global.parallel, None);
+
+    let bare = parse_cli(&["terminal", "open", "--parallel", "--stdin"])?;
+    assert_eq!(bare.global.parallel, Some(None));
+    assert!(matches!(
+        bare.command,
+        Command::Terminal(TerminalArgs {
+            command: TerminalCommand::Open(OpenTerminalArgs { stdin: true, .. })
+        })
+    ));
+
+    let valued = parse_cli(&["--parallel=12", "terminal", "open"])?;
+    assert_eq!(valued.global.parallel, Some(Some(12)));
+
+    let short_attached = parse_cli(&["-p8", "terminal", "open"])?;
+    assert_eq!(short_attached.global.parallel, Some(Some(8)));
+
+    assert!(
+        parse_cli(&["--parallel", "-3", "terminal", "open"]).is_err(),
+        "dash-prefixed optional values must use equals form"
+    );
+
+    let generated = valued.to_args_string()?;
+    assert_eq!(generated, "--parallel=12 terminal open");
+
+    println!("optional:    --parallel is Some(None), --parallel=12 is Some(Some(12))");
+    println!("             canonical ToArgs form: {generated}");
     println!();
 
     Ok(())

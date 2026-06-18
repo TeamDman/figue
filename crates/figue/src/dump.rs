@@ -396,6 +396,9 @@ fn build_entry_from_schema(
         }
 
         // Option: unwrap and recurse
+        (ConfigValue::ExplicitSome(sourced), ConfigValueSchema::Option { value: inner, .. }) => {
+            build_entry_from_schema(key, &sourced.value, inner, is_sensitive, opts)
+        }
         (value, ConfigValueSchema::Option { value: inner, .. }) => {
             build_entry_from_schema(key, value, inner, is_sensitive, opts)
         }
@@ -652,6 +655,9 @@ fn build_leaf_entry(
                 provenance: format_provenance(&sourced.provenance),
                 children,
             }
+        }
+        ConfigValue::ExplicitSome(sourced) => {
+            build_leaf_entry(key, &sourced.value, is_sensitive, opts)
         }
     }
 }

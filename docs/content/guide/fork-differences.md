@@ -93,6 +93,30 @@ Behavior:
 The fork includes schema-driven `to_args` support and roundtrip helpers beyond
 what upstream currently provides.
 
+### Optional-value named CLI args
+
+The fork treats `Option<Option<T>>` on a named, non-bool, single-value CLI field
+as an optional-value flag:
+
+```rust,noexec
+#[derive(Facet)]
+struct Args {
+    #[facet(args::named)]
+    parallel: Option<Option<usize>>,
+}
+```
+
+Behavior:
+
+- an absent `--parallel` parses as `None`
+- bare `--parallel` parses as `Some(None)`
+- `--parallel 12` and `--parallel=12` parse as `Some(Some(12))`
+- `--parallel --dry-run` parses the bare parallel flag and leaves `--dry-run`
+  available as another flag
+- dash-prefixed values use equals form, such as `--parallel=-3`
+- `to_args` emits nothing for `None`, `--parallel` for `Some(None)`, and
+  `--parallel=12` for `Some(Some(12))`
+
 ### Arbitrary-based test helpers
 
 The fork includes arbitrary-based test helpers and default arbitrary test

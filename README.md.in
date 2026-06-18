@@ -42,7 +42,7 @@ The entry point of figue is [`builder`] — let yourself be guided from there.
   merge rules, error catalog).
 - **Fork API docs**: <https://docs.rs/teamy-figue>
 - **Fork differences**: [docs/content/guide/fork-differences.md](docs/content/guide/fork-differences.md) — intentional Teamy fork behavior that differs from upstream
-- **Runnable fork behavior summary**: [crates/figue/examples/teamy_fork_behaviour.rs](crates/figue/examples/teamy_fork_behaviour.rs) — a single annotated example covering the main Teamy fork extensions
+- **Runnable fork behavior summary**: [crates/figue/examples/teamy_fork_behaviour.rs](crates/figue/examples/teamy_fork_behaviour.rs) — a single annotated example covering the main Teamy fork extensions, including aliases, optional-value named args, and `to_args` roundtrips
 
 This fork uses its own semver; the exact upstream `figue` base is recorded in
 `Cargo.toml` under `workspace.metadata.teamy.upstream_figue`.

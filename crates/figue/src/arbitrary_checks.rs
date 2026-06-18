@@ -12,7 +12,7 @@ use rand_chacha::ChaCha8Rng;
 use crate::ToArgs;
 use crate::config_value_parser::from_config_value;
 use crate::layers::cli::{CliConfigBuilder, parse_cli};
-use crate::schema::{ArgKind, ArgLevelSchema, Schema};
+use crate::schema::{ArgKind, ArgLevelSchema, NamedValueMode, Schema};
 
 /// Error returned by arbitrary-based CLI roundtrip checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -441,7 +441,11 @@ fn command_node_from_arg_level(level: &ArgLevelSchema) -> CommandNode {
                 node.positional_count += 1;
             }
             ArgKind::Named { counted, .. } => {
-                let consumes_value = !counted && !schema.value().inner_if_option().is_bool();
+                let consumes_value = !counted
+                    && matches!(
+                        schema.named_value_mode(),
+                        Some(NamedValueMode::RequiredValue)
+                    );
                 node.named_flag_consumes_value
                     .insert(name.to_kebab_case(), consumes_value);
             }

@@ -39,7 +39,8 @@ use crate::config_value::{ConfigValue, EnumValue, Sourced};
 use crate::driver::{Diagnostic, HelpListMode, LayerOutput, Severity};
 use crate::provenance::Provenance;
 use crate::schema::{
-    ArgKind, ArgLevelSchema, ArgSchema, ConfigStructSchema, ConfigValueSchema, Schema, Subcommand,
+    ArgKind, ArgLevelSchema, ArgSchema, ConfigStructSchema, ConfigValueSchema, NamedValueMode,
+    Schema, Subcommand,
 };
 use crate::value_builder::{LeafValue, ValueBuilder};
 
@@ -181,10 +182,8 @@ struct ParentFlagLookup {
     effective_name: String,
     /// ConfigValue path to insert into at that parent level.
     insertion_path: Vec<String>,
-    /// Whether this is a bool flag
-    is_bool: bool,
-    /// Whether this is a counted flag
-    is_counted: bool,
+    /// How this named flag accepts values.
+    value_mode: NamedValueMode,
     /// Whether this flag accepts multiple values
     is_multiple: bool,
 }
@@ -403,9 +402,10 @@ impl<'a> ParseContext<'a> {
         // Look up in schema - Args::get converts schema keys to kebab-case for comparison
         // and returns the original effective_name for storage in ConfigValue
         if let Some((effective_name, arg_schema)) = level.args().get(flag_name) {
-            if let ArgKind::Named { counted, .. } = arg_schema.kind()
-                && *counted
-            {
+            let value_mode = arg_schema
+                .named_value_mode()
+                .expect("long flag lookup returned a non-named argument");
+            if matches!(value_mode, NamedValueMode::CountedFlag) {
                 self.increment_counted(effective_name);
                 self.index += 1;
                 return;
@@ -414,7 +414,7 @@ impl<'a> ParseContext<'a> {
         } else if let Some(lookup) = self.find_long_flag_in_parents(flag_name) {
             // Adoption agency: flag found in parent level, bubble up
             let target = InsertTarget::Parent(lookup.parent_idx);
-            if lookup.is_counted {
+            if matches!(lookup.value_mode, NamedValueMode::CountedFlag) {
                 self.increment_counted_to(target, &lookup.effective_name);
                 self.index += 1;
                 return;
@@ -423,7 +423,7 @@ impl<'a> ParseContext<'a> {
                 arg,
                 target,
                 &lookup.insertion_path,
-                lookup.is_bool,
+                lookup.value_mode,
                 lookup.is_multiple,
                 None, // enum_variants not available for parent lookup
                 inline_value,
@@ -431,7 +431,10 @@ impl<'a> ParseContext<'a> {
         } else if let Some(negated_name) = flag_name.strip_prefix("no-") {
             // --no-<flag> syntax: negate a boolean flag
             if let Some((_effective_name, arg_schema)) = level.args().get(negated_name)
-                && arg_schema.value().inner_if_option().is_bool()
+                && matches!(
+                    arg_schema.named_value_mode(),
+                    Some(NamedValueMode::BoolFlag)
+                )
             {
                 let prov = Provenance::cli(arg, "false".to_string());
                 self.insert_value_path_to(
@@ -446,7 +449,7 @@ impl<'a> ParseContext<'a> {
                 );
                 self.index += 1;
             } else if let Some(lookup) = self.find_long_flag_in_parents(negated_name)
-                && lookup.is_bool
+                && matches!(lookup.value_mode, NamedValueMode::BoolFlag)
             {
                 // Adoption agency: boolean flag found in parent, negate it
                 let target = InsertTarget::Parent(lookup.parent_idx);
@@ -604,20 +607,20 @@ impl<'a> ParseContext<'a> {
             });
 
             // Determine target and flag info
-            let (target, name, insertion_path, is_bool, is_counted, is_multiple) =
+            let (target, name, insertion_path, value_mode, is_multiple) =
                 if let Some((name, arg_schema)) = found {
-                    let is_counted =
-                        matches!(arg_schema.kind(), ArgKind::Named { counted: true, .. });
-                    let is_bool = arg_schema
-                        .value()
-                        .inner_if_option()
-                        .is_bool_or_vec_of_bool();
+                    let value_mode = if arg_schema.value().is_bool_or_vec_of_bool() {
+                        NamedValueMode::BoolFlag
+                    } else {
+                        arg_schema
+                            .named_value_mode()
+                            .expect("short flag lookup returned a non-named argument")
+                    };
                     (
                         InsertTarget::Current,
                         name.to_string(),
                         arg_schema.insertion_path().to_vec(),
-                        is_bool,
-                        is_counted,
+                        value_mode,
                         arg_schema.multiple(),
                     )
                 } else if let Some(lookup) = self.find_short_flag_in_parents(*ch) {
@@ -626,8 +629,7 @@ impl<'a> ParseContext<'a> {
                         InsertTarget::Parent(lookup.parent_idx),
                         lookup.effective_name,
                         lookup.insertion_path,
-                        lookup.is_bool,
-                        lookup.is_counted,
+                        lookup.value_mode,
                         lookup.is_multiple,
                     )
                 } else {
@@ -635,14 +637,14 @@ impl<'a> ParseContext<'a> {
                     continue;
                 };
 
-            if is_counted {
+            if matches!(value_mode, NamedValueMode::CountedFlag) {
                 self.increment_counted_to(target, &name);
                 continue;
             }
 
             let is_last = i == chars.len() - 1;
 
-            if is_bool {
+            if matches!(value_mode, NamedValueMode::BoolFlag) {
                 // Bool flag: set to true
                 let prov = Provenance::cli(format!("-{}", ch), "true");
                 self.insert_value_path_to(
@@ -655,6 +657,33 @@ impl<'a> ParseContext<'a> {
                     }),
                     is_multiple,
                 );
+            } else if matches!(value_mode, NamedValueMode::OptionalValue) {
+                let prov_arg = format!("-{}", ch);
+                if is_last {
+                    let flag_span = self.current_span();
+                    let value = self.optional_none_value(&prov_arg, flag_span);
+                    self.insert_value_path_to_with_span(
+                        target,
+                        &insertion_path,
+                        value,
+                        is_multiple,
+                        Some(flag_span),
+                    );
+                } else {
+                    // Optional-value short flag with attached value: -p12
+                    let rest: String = chars[i + 1..].iter().collect();
+                    let value_span = self.span_within_current(i + 1, rest.len());
+                    let value = self.parse_value_string(&rest, &prov_arg, value_span);
+                    let duplicate_span = Self::union_span(self.current_span(), value_span);
+                    self.insert_value_path_to_with_span(
+                        target,
+                        &insertion_path,
+                        Self::explicit_some(value),
+                        is_multiple,
+                        Some(duplicate_span),
+                    );
+                    break; // Consumed rest of chars
+                }
             } else if is_last {
                 // Non-bool flag at end: look for value
                 let flag_span = self.current_span(); // Save span before incrementing
@@ -700,16 +729,16 @@ impl<'a> ParseContext<'a> {
         });
 
         // Determine target and flag info
-        let (target, name, insertion_path, is_bool, is_counted, is_multiple) =
+        let (target, name, insertion_path, value_mode, is_multiple) =
             if let Some((name, arg_schema)) = found {
-                let is_counted = matches!(arg_schema.kind(), ArgKind::Named { counted: true, .. });
-                let is_bool = arg_schema.value().inner_if_option().is_bool();
+                let value_mode = arg_schema
+                    .named_value_mode()
+                    .expect("short flag lookup returned a non-named argument");
                 (
                     InsertTarget::Current,
                     name.to_string(),
                     arg_schema.insertion_path().to_vec(),
-                    is_bool,
-                    is_counted,
+                    value_mode,
                     arg_schema.multiple(),
                 )
             } else if let Some(lookup) = self.find_short_flag_in_parents(ch) {
@@ -718,8 +747,7 @@ impl<'a> ParseContext<'a> {
                     InsertTarget::Parent(lookup.parent_idx),
                     lookup.effective_name,
                     lookup.insertion_path,
-                    lookup.is_bool,
-                    lookup.is_counted,
+                    lookup.value_mode,
                     lookup.is_multiple,
                 )
             } else {
@@ -727,14 +755,14 @@ impl<'a> ParseContext<'a> {
                 return;
             };
 
-        if is_counted {
+        if matches!(value_mode, NamedValueMode::CountedFlag) {
             self.increment_counted_to(target, &name);
             return;
         }
 
         let prov_arg = format!("-{}", ch);
 
-        if is_bool {
+        if matches!(value_mode, NamedValueMode::BoolFlag) {
             // -k=true or -k=false
             let value = matches!(
                 value_str.to_lowercase().as_str(),
@@ -751,6 +779,15 @@ impl<'a> ParseContext<'a> {
                 }),
                 is_multiple,
             );
+        } else if matches!(value_mode, NamedValueMode::OptionalValue) {
+            let value_span = self.span_within_current(3, value_str.len());
+            let value = self.parse_value_string(value_str, &prov_arg, value_span);
+            self.insert_value_path_to(
+                target,
+                &insertion_path,
+                Self::explicit_some(value),
+                is_multiple,
+            );
         } else {
             // Value starts after the '=' which is at position 2 (after -k)
             let value_span = self.span_within_current(3, value_str.len());
@@ -760,14 +797,16 @@ impl<'a> ParseContext<'a> {
     }
 
     fn parse_flag_value(&mut self, arg: &str, schema: &ArgSchema, inline_value: Option<&str>) {
-        let is_bool = schema.value().inner_if_option().is_bool();
+        let value_mode = schema
+            .named_value_mode()
+            .expect("parse_flag_value called with a non-named argument");
         let is_multiple = schema.multiple();
-        let enum_variants = schema.value().inner_if_option().enum_variants();
+        let enum_variants = schema.cli_value_schema().enum_variants();
         self.parse_flag_value_simple(
             arg,
             InsertTarget::Current,
             schema.insertion_path(),
-            is_bool,
+            value_mode,
             is_multiple,
             enum_variants,
             inline_value,
@@ -780,102 +819,171 @@ impl<'a> ParseContext<'a> {
         arg: &str,
         target: InsertTarget,
         insertion_path: &[String],
-        is_bool: bool,
+        value_mode: NamedValueMode,
         is_multiple: bool,
         enum_variants: Option<&[String]>,
         inline_value: Option<&str>,
     ) {
-        if is_bool {
-            let flag_span = self.current_span();
-            // Bool flag: presence means true
-            let value = if let Some(v) = inline_value {
-                // --flag=true or --flag=false
-                matches!(v.to_lowercase().as_str(), "true" | "yes" | "1" | "on" | "")
-            } else {
-                true
-            };
-            let prov = Provenance::cli(arg, value.to_string());
+        match value_mode {
+            NamedValueMode::BoolFlag => {
+                let flag_span = self.current_span();
+                // Bool flag: presence means true
+                let value = if let Some(v) = inline_value {
+                    // --flag=true or --flag=false
+                    matches!(v.to_lowercase().as_str(), "true" | "yes" | "1" | "on" | "")
+                } else {
+                    true
+                };
+                let prov = Provenance::cli(arg, value.to_string());
+                self.insert_value_path_to_with_span(
+                    target,
+                    insertion_path,
+                    ConfigValue::Bool(Sourced {
+                        value,
+                        span: None,
+                        provenance: Some(prov),
+                    }),
+                    is_multiple,
+                    Some(flag_span),
+                );
+                self.index += 1;
+            }
+            NamedValueMode::OptionalValue => {
+                self.parse_optional_flag_value(
+                    arg,
+                    target,
+                    insertion_path,
+                    is_multiple,
+                    inline_value,
+                );
+            }
+            NamedValueMode::RequiredValue => {
+                // Non-bool: need a value
+                let flag_span = self.current_span();
+                let name = insertion_path.last().map(String::as_str).unwrap_or("");
+
+                // Check up-front whether this is the special completions field,
+                // which is allowed to omit its value (triggering auto-detection).
+                let is_completions_field = self
+                    .schema
+                    .special()
+                    .completions
+                    .as_ref()
+                    .and_then(|p| p.last())
+                    .map(|s| s.as_str() == name)
+                    .unwrap_or(false);
+
+                let (value_str, value_span) = if let Some(v) = inline_value {
+                    // --flag=value: value starts after the '='
+                    let eq_pos = arg.find('=').unwrap_or(0) + 1;
+                    let span = self.span_within_current(eq_pos, v.len());
+                    self.index += 1;
+                    (v, span)
+                } else {
+                    self.index += 1;
+                    let at_end = self.index >= self.args.len();
+                    let next_looks_like_flag = !at_end && self.args[self.index].starts_with('-');
+
+                    if is_completions_field && (at_end || next_looks_like_flag) {
+                        // No shell specified — store sentinel for auto-detection.
+                        let prov = Provenance::cli(arg, "auto");
+                        self.insert_value_path_to(
+                            target,
+                            insertion_path,
+                            ConfigValue::String(Sourced {
+                                value: "auto".to_string(),
+                                span: None,
+                                provenance: Some(prov),
+                            }),
+                            is_multiple,
+                        );
+                        return;
+                    }
+
+                    if at_end {
+                        let error_msg = if let Some(variants) = enum_variants {
+                            let variant_list = variants.join(", ");
+                            format!("flag {} requires one of: {}", arg, variant_list)
+                        } else {
+                            format!("flag {} requires a value", arg)
+                        };
+                        self.emit_error_at(error_msg, flag_span);
+                        return;
+                    }
+
+                    let span = self.current_span();
+                    let v = self.args[self.index];
+                    self.index += 1;
+                    (v, span)
+                };
+
+                let prov_arg = arg.split('=').next().unwrap_or(arg);
+                let value = self.parse_value_string(value_str, prov_arg, value_span);
+                let duplicate_span = Self::union_span(flag_span, value_span);
+                self.insert_value_path_to_with_span(
+                    target,
+                    insertion_path,
+                    value,
+                    is_multiple,
+                    Some(duplicate_span),
+                );
+            }
+            NamedValueMode::CountedFlag => {
+                self.index += 1;
+            }
+        }
+    }
+
+    fn parse_optional_flag_value(
+        &mut self,
+        arg: &str,
+        target: InsertTarget,
+        insertion_path: &[String],
+        is_multiple: bool,
+        inline_value: Option<&str>,
+    ) {
+        let flag_span = self.current_span();
+
+        if let Some(v) = inline_value {
+            let eq_pos = arg.find('=').unwrap_or(0) + 1;
+            let value_span = self.span_within_current(eq_pos, v.len());
+            let prov_arg = arg.split('=').next().unwrap_or(arg);
+            let value = self.parse_value_string(v, prov_arg, value_span);
+            let duplicate_span = Self::union_span(flag_span, value_span);
             self.insert_value_path_to_with_span(
                 target,
                 insertion_path,
-                ConfigValue::Bool(Sourced {
-                    value,
-                    span: None,
-                    provenance: Some(prov),
-                }),
+                Self::explicit_some(value),
                 is_multiple,
-                Some(flag_span),
+                Some(duplicate_span),
+            );
+            self.index += 1;
+            return;
+        }
+
+        self.index += 1;
+
+        if self.index < self.args.len() && !self.args[self.index].starts_with('-') {
+            let value_span = self.current_span();
+            let value_str = self.args[self.index];
+            let value = self.parse_value_string(value_str, arg, value_span);
+            let duplicate_span = Self::union_span(flag_span, value_span);
+            self.insert_value_path_to_with_span(
+                target,
+                insertion_path,
+                Self::explicit_some(value),
+                is_multiple,
+                Some(duplicate_span),
             );
             self.index += 1;
         } else {
-            // Non-bool: need a value
-            let flag_span = self.current_span();
-            let name = insertion_path.last().map(String::as_str).unwrap_or("");
-
-            // Check up-front whether this is the special completions field,
-            // which is allowed to omit its value (triggering auto-detection).
-            let is_completions_field = self
-                .schema
-                .special()
-                .completions
-                .as_ref()
-                .and_then(|p| p.last())
-                .map(|s| s.as_str() == name)
-                .unwrap_or(false);
-
-            let (value_str, value_span) = if let Some(v) = inline_value {
-                // --flag=value: value starts after the '='
-                let eq_pos = arg.find('=').unwrap_or(0) + 1;
-                let span = self.span_within_current(eq_pos, v.len());
-                self.index += 1;
-                (v, span)
-            } else {
-                self.index += 1;
-                let at_end = self.index >= self.args.len();
-                let next_looks_like_flag = !at_end && self.args[self.index].starts_with('-');
-
-                if is_completions_field && (at_end || next_looks_like_flag) {
-                    // No shell specified — store sentinel for auto-detection.
-                    let prov = Provenance::cli(arg, "auto");
-                    self.insert_value_path_to(
-                        target,
-                        insertion_path,
-                        ConfigValue::String(Sourced {
-                            value: "auto".to_string(),
-                            span: None,
-                            provenance: Some(prov),
-                        }),
-                        is_multiple,
-                    );
-                    return;
-                }
-
-                if at_end {
-                    let error_msg = if let Some(variants) = enum_variants {
-                        let variant_list = variants.join(", ");
-                        format!("flag {} requires one of: {}", arg, variant_list)
-                    } else {
-                        format!("flag {} requires a value", arg)
-                    };
-                    self.emit_error_at(error_msg, flag_span);
-                    return;
-                }
-
-                let span = self.current_span();
-                let v = self.args[self.index];
-                self.index += 1;
-                (v, span)
-            };
-
-            let prov_arg = arg.split('=').next().unwrap_or(arg);
-            let value = self.parse_value_string(value_str, prov_arg, value_span);
-            let duplicate_span = Self::union_span(flag_span, value_span);
+            let value = self.optional_none_value(arg, flag_span);
             self.insert_value_path_to_with_span(
                 target,
                 insertion_path,
                 value,
                 is_multiple,
-                Some(duplicate_span),
+                Some(flag_span),
             );
         }
     }
@@ -1103,7 +1211,10 @@ impl<'a> ParseContext<'a> {
 
         if let Some((_effective_name, arg_schema)) = level.args().get("help")
             && matches!(arg_schema.kind(), ArgKind::Named { .. })
-            && arg_schema.value().inner_if_option().is_bool()
+            && matches!(
+                arg_schema.named_value_mode(),
+                Some(NamedValueMode::BoolFlag)
+            )
         {
             if let Some(mode) = list_mode {
                 self.help_list_mode = Some(mode);
@@ -1112,7 +1223,7 @@ impl<'a> ParseContext<'a> {
                 arg,
                 InsertTarget::Current,
                 arg_schema.insertion_path(),
-                true,
+                NamedValueMode::BoolFlag,
                 arg_schema.multiple(),
                 None,
                 None,
@@ -1128,7 +1239,7 @@ impl<'a> ParseContext<'a> {
         }
 
         if let Some(lookup) = self.find_long_flag_in_parents("help")
-            && lookup.is_bool
+            && matches!(lookup.value_mode, NamedValueMode::BoolFlag)
         {
             if let Some(mode) = list_mode {
                 self.help_list_mode = Some(mode);
@@ -1137,7 +1248,7 @@ impl<'a> ParseContext<'a> {
                 arg,
                 InsertTarget::Parent(lookup.parent_idx),
                 &lookup.insertion_path,
-                true,
+                NamedValueMode::BoolFlag,
                 lookup.is_multiple,
                 None,
                 None,
@@ -1226,15 +1337,15 @@ impl<'a> ParseContext<'a> {
         // Search parent stack from innermost (most recent) to outermost
         for (idx, parent) in self.parent_stack.iter().enumerate().rev() {
             if let Some((effective_name, arg_schema)) = parent.args.args().get(flag_name) {
-                let is_counted = matches!(arg_schema.kind(), ArgKind::Named { counted: true, .. });
-                let is_bool = arg_schema.value().inner_if_option().is_bool();
+                let value_mode = arg_schema
+                    .named_value_mode()
+                    .expect("long flag lookup returned a non-named argument");
                 let is_multiple = arg_schema.multiple();
                 return Some(ParentFlagLookup {
                     parent_idx: idx,
                     effective_name: effective_name.to_string(),
                     insertion_path: arg_schema.insertion_path().to_vec(),
-                    is_bool,
-                    is_counted,
+                    value_mode,
                     is_multiple,
                 });
             }
@@ -1251,15 +1362,19 @@ impl<'a> ParseContext<'a> {
                 if let ArgKind::Named { short: Some(s), .. } = schema.kind()
                     && *s == ch
                 {
-                    let is_counted = matches!(schema.kind(), ArgKind::Named { counted: true, .. });
-                    let is_bool = schema.value().inner_if_option().is_bool();
+                    let value_mode = if schema.value().is_bool_or_vec_of_bool() {
+                        NamedValueMode::BoolFlag
+                    } else {
+                        schema
+                            .named_value_mode()
+                            .expect("short flag lookup returned a non-named argument")
+                    };
                     let is_multiple = schema.multiple();
                     return Some(ParentFlagLookup {
                         parent_idx: idx,
                         effective_name: name.to_string(),
                         insertion_path: schema.insertion_path().to_vec(),
-                        is_bool,
-                        is_counted,
+                        value_mode,
                         is_multiple,
                     });
                 }
@@ -1365,6 +1480,30 @@ impl<'a> ParseContext<'a> {
             value: s.to_string(),
             span: Some(span),
             provenance: prov,
+        })
+    }
+
+    fn optional_none_value(&self, arg_name: &str, span: facet_reflect::Span) -> ConfigValue {
+        let provenance = Some(Provenance::cli(arg_name, ""));
+        let inner = ConfigValue::Null(Sourced {
+            value: (),
+            span: Some(span),
+            provenance: provenance.clone(),
+        });
+        ConfigValue::ExplicitSome(Sourced {
+            value: Box::new(inner),
+            span: Some(span),
+            provenance,
+        })
+    }
+
+    fn explicit_some(value: ConfigValue) -> ConfigValue {
+        let span = value.span();
+        let provenance = value.provenance().cloned();
+        ConfigValue::ExplicitSome(Sourced {
+            value: Box::new(value),
+            span,
+            provenance,
         })
     }
 

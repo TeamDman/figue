@@ -6,6 +6,8 @@ Notable differences in this fork include:
 
 - first-class long-form CLI flag aliases for named args via `#[facet(args::long_alias = "...")]`
 - long-form subcommand aliases via `#[facet(args::alias = "...")]`
+- optional-value named args via `Option<Option<T>>`, so `--parallel`,
+  `--parallel=12`, and an absent flag are distinct states
 - schema-driven `to_args` support and roundtrip helpers
 - arbitrary-based test helpers and default arbitrary test configs
 - fixes for transparent CLI args and `to_args` roundtrips
@@ -16,8 +18,8 @@ The canonical maintained list lives in [docs/content/guide/fork-differences.md](
 For a compact runnable summary, see
 [crates/figue/examples/teamy_fork_behaviour.rs](crates/figue/examples/teamy_fork_behaviour.rs).
 It demonstrates aliases, `to_args` roundtrips, `help list`, implementation
-source hints, Teamy-style version metadata, transparent newtypes, and custom
-fallible scalar parsing through a Facet proxy.
+source hints, optional-value named args, Teamy-style version metadata,
+transparent newtypes, and custom fallible scalar parsing through a Facet proxy.
 
 Versioning policy:
 

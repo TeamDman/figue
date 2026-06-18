@@ -6,7 +6,7 @@ use heck::ToKebabCase;
 
 use crate::config_value::{ConfigValue, ObjectMap};
 use crate::config_value_parser::ConfigValueSerializer;
-use crate::schema::{ArgKind, ArgLevelSchema, ArgSchema, Schema, ValueSchema};
+use crate::schema::{ArgKind, ArgLevelSchema, ArgSchema, NamedValueMode, Schema, ValueSchema};
 
 /// Error type for converting a typed CLI value back into command-line arguments.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,8 +238,12 @@ fn encode_named_arg(
         return Ok(());
     }
 
-    if schema.kind().is_counted() {
-        let ConfigValue::Integer(count) = value else {
+    let value_mode = schema
+        .named_value_mode()
+        .expect("encode_named_arg called with a non-named argument");
+
+    if matches!(value_mode, NamedValueMode::CountedFlag) {
+        let ConfigValue::Integer(count) = unwrap_explicit_some(value).unwrap_or(value) else {
             return Err(ToArgsError::UnsupportedScalarValue {
                 arg_name: name.to_string(),
             });
@@ -258,8 +262,8 @@ fn encode_named_arg(
         return Ok(());
     }
 
-    if schema.value().inner_if_option().is_bool() {
-        if let ConfigValue::Bool(bool_value) = value
+    if matches!(value_mode, NamedValueMode::BoolFlag) {
+        if let ConfigValue::Bool(bool_value) = unwrap_explicit_some(value).unwrap_or(value)
             && bool_value.value
         {
             args.push(flag.into());
@@ -268,7 +272,7 @@ fn encode_named_arg(
     }
 
     if schema.multiple() {
-        let ConfigValue::Array(array) = value else {
+        let ConfigValue::Array(array) = unwrap_explicit_some(value).unwrap_or(value) else {
             return Err(ToArgsError::UnsupportedScalarValue {
                 arg_name: name.to_string(),
             });
@@ -280,16 +284,32 @@ fn encode_named_arg(
             }
 
             args.push(flag.clone().into());
-            args.push(
-                value_to_cli_token(name, item, Some(schema.value().inner_if_option()))?.into(),
-            );
+            args.push(value_to_cli_token(name, item, Some(schema.cli_value_schema()))?.into());
         }
 
         return Ok(());
     }
 
+    if matches!(value_mode, NamedValueMode::OptionalValue) {
+        let Some(inner) = as_explicit_some(value) else {
+            return Ok(());
+        };
+        let inner = unwrap_explicit_some(inner).unwrap_or(inner);
+        args.push(if matches!(inner, ConfigValue::Null(_)) {
+            flag.into()
+        } else {
+            format!(
+                "{flag}={}",
+                value_to_cli_token(name, inner, Some(schema.cli_value_schema()))?
+            )
+            .into()
+        });
+        return Ok(());
+    }
+
+    let value = unwrap_explicit_some(value).unwrap_or(value);
     args.push(flag.into());
-    args.push(value_to_cli_token(name, value, Some(schema.value().inner_if_option()))?.into());
+    args.push(value_to_cli_token(name, value, Some(schema.cli_value_schema()))?.into());
     Ok(())
 }
 
@@ -302,6 +322,13 @@ fn encode_positional_arg(
 ) -> Result<(), ToArgsError> {
     match value {
         ConfigValue::Null(_) => Ok(()),
+        ConfigValue::ExplicitSome(sourced) => encode_positional_arg(
+            name,
+            schema,
+            &sourced.value,
+            args,
+            emitted_positional_separator,
+        ),
         ConfigValue::Array(array) => {
             for item in &array.value {
                 if matches!(item, ConfigValue::Null(_)) {
@@ -338,6 +365,10 @@ fn value_to_cli_token(
     value: &ConfigValue,
     value_schema: Option<&ValueSchema>,
 ) -> Result<String, ToArgsError> {
+    if let ConfigValue::ExplicitSome(sourced) = value {
+        return value_to_cli_token(name, &sourced.value, value_schema);
+    }
+
     match value {
         ConfigValue::Bool(sourced) => Ok(sourced.value.to_string()),
         ConfigValue::Integer(sourced) => Ok(integer_to_cli_token(sourced.value, value_schema)),
@@ -355,6 +386,22 @@ fn value_to_cli_token(
             arg_name: name.to_string(),
         }),
     }
+}
+
+fn as_explicit_some(value: &ConfigValue) -> Option<&ConfigValue> {
+    match value {
+        ConfigValue::ExplicitSome(sourced) => Some(sourced.value.as_ref()),
+        _ => None,
+    }
+}
+
+fn unwrap_explicit_some(mut value: &ConfigValue) -> Option<&ConfigValue> {
+    let mut unwrapped = false;
+    while let ConfigValue::ExplicitSome(sourced) = value {
+        value = sourced.value.as_ref();
+        unwrapped = true;
+    }
+    unwrapped.then_some(value)
 }
 
 fn integer_to_cli_token(value: i64, value_schema: Option<&ValueSchema>) -> String {
@@ -376,6 +423,7 @@ fn integer_to_cli_token(value: i64, value_schema: Option<&ValueSchema>) -> Strin
 
 fn as_enum_variant(value: &ConfigValue) -> Option<(&str, &ObjectMap)> {
     match value {
+        ConfigValue::ExplicitSome(sourced) => as_enum_variant(&sourced.value),
         ConfigValue::Enum(sourced) => Some((&sourced.value.variant, &sourced.value.fields)),
         ConfigValue::String(sourced) => Some((&sourced.value, empty_object_map())),
         ConfigValue::Object(sourced) if sourced.value.len() == 1 => {

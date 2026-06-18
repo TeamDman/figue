@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- support optional-value named CLI args via `Option<Option<T>>`
+
 ## [5.0.0] - 2026-06-06
 
 ### Added
