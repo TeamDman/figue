@@ -492,21 +492,6 @@ dependencies = [
 [[package]]
 name = "facet-format"
 version = "0.47.1"
-dependencies = [
- "ariadne",
- "facet-core",
- "facet-dessert",
- "facet-path",
- "facet-reflect",
- "facet-solver",
- "parking_lot",
- "stacker",
- "tracing",
-]
-
-[[package]]
-name = "facet-format"
-version = "0.47.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2353807588cc4057a5e31bf459e7304ea84729ad77080e267928b1e09d36235"
 dependencies = [
@@ -526,7 +511,7 @@ checksum = "a6fbb1d8aa586b5e6b189575d1eda196cd3014347aff36be8dd097401024fe6d"
 dependencies = [
  "facet",
  "facet-core",
- "facet-format 0.47.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "facet-format",
  "facet-reflect",
  "tracing",
 ]
@@ -1791,8 +1776,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
+name = "teamy-facet-format"
+version = "0.47.1-teamy.1"
+dependencies = [
+ "ariadne",
+ "facet-core",
+ "facet-dessert",
+ "facet-path",
+ "facet-reflect",
+ "facet-solver",
+ "parking_lot",
+ "stacker",
+ "tracing",
+]
+
+[[package]]
 name = "teamy-figue"
-version = "5.1.0"
+version = "5.2.0"
 dependencies = [
  "arbitrary",
  "ariadne",
@@ -1800,7 +1800,6 @@ dependencies = [
  "facet",
  "facet-core",
  "facet-error",
- "facet-format 0.47.1",
  "facet-json",
  "facet-pretty",
  "facet-reflect",
@@ -1815,6 +1814,7 @@ dependencies = [
  "strip-ansi-escapes",
  "strsim",
  "supports-color 3.0.2",
+ "teamy-facet-format",
  "teamy-figue-attrs",
  "tempfile",
  "tracing",
@@ -1823,7 +1823,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-figue-attrs"
-version = "5.1.0"
+version = "5.2.0"
 dependencies = [
  "facet",
 ]

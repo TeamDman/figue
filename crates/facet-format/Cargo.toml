@@ -12,15 +12,15 @@
 [package]
 edition = "2024"
 rust-version = "1.90"
-name = "facet-format"
-version = "0.47.1"
+name = "teamy-facet-format"
+version = "0.47.1-teamy.1"
 build = false
 autolib = false
 autobins = false
 autoexamples = false
 autotests = false
 autobenches = false
-description = "Core Serializer/Deserializer traits for facet"
+description = "Teamy-patched Core Serializer/Deserializer traits for facet"
 homepage = "https://facet.rs"
 readme = "README.md"
 keywords = [
@@ -34,7 +34,7 @@ categories = [
     "parsing",
 ]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/facet-rs/facet-format"
+repository = "https://github.com/TeamDman/figue"
 
 [package.metadata.docs.rs]
 rustdoc-args = [
