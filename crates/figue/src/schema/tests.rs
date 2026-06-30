@@ -139,7 +139,7 @@ struct ArgsWithAlias {
 
 #[derive(Facet)]
 struct ConflictingAliasAndCanonical {
-    #[facet(args::named, rename = "drive", args::alias = "port")]
+    #[facet(args::named, args::alias = "port")]
     drive: bool,
     #[facet(args::named)]
     port: bool,
@@ -725,4 +725,5 @@ fn test_subcommand_alias_conflict_with_other_alias_detected() {
         err
     );
 }
+
 

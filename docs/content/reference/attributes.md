@@ -43,7 +43,6 @@ boolean `--no-...` negation.
 ```rust,noexec
 #[facet(
     args::named,
-    rename = "drive",
     args::alias = "drive-letter-pattern",
 )]
 drive: Option<String>, // --drive and --drive-letter-pattern

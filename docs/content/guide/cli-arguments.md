@@ -97,7 +97,6 @@ older or alternate flag spelling too:
 struct Args {
     #[facet(
         args::named,
-        rename = "drive",
         args::alias = "drive-letter-pattern",
     )]
     drive: Option<String>,
