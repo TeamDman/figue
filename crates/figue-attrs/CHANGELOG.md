@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.0](https://github.com/TeamDman/figue/compare/teamy-figue-attrs-v5.2.0...teamy-figue-attrs-v6.0.0) - 2026-06-30
+
+### Other
+
+- Remove long_alias in favor of repeated alias attrs
+
 ## [4.0.0](https://github.com/bearcove/figue/compare/figue-attrs-v3.0.1...figue-attrs-v4.0.0) - 2026-05-09
 
 ### Other

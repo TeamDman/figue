@@ -1792,7 +1792,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-figue"
-version = "5.2.0"
+version = "6.0.0"
 dependencies = [
  "arbitrary",
  "ariadne",
@@ -1823,7 +1823,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-figue-attrs"
-version = "5.2.0"
+version = "6.0.0"
 dependencies = [
  "facet",
 ]
