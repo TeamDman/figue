@@ -128,38 +128,38 @@ struct ConflictingShortFlags {
 }
 
 #[derive(Facet)]
-struct ArgsWithLongAlias {
+struct ArgsWithAlias {
     #[facet(
         args::named,
         rename = "drive",
-        args::long_alias = "drive-letter-pattern"
+        args::alias = "drive-letter-pattern"
     )]
     drive_letter_pattern: bool,
 }
 
 #[derive(Facet)]
-struct ConflictingLongAliasAndCanonical {
-    #[facet(args::named, rename = "drive", args::long_alias = "port")]
+struct ConflictingAliasAndCanonical {
+    #[facet(args::named, rename = "drive", args::alias = "port")]
     drive: bool,
     #[facet(args::named)]
     port: bool,
 }
 
 #[derive(Facet)]
-struct DuplicateLongAliasOnField {
+struct DuplicateAliasOnField {
     #[facet(
         args::named,
-        args::long_alias = "drive-letter-pattern",
-        args::long_alias = "drive-letter-pattern"
+        args::alias = "drive-letter-pattern",
+        args::alias = "drive-letter-pattern"
     )]
     drive: bool,
 }
 
 #[derive(Facet)]
-struct ConflictingLongAliases {
-    #[facet(args::named, args::long_alias = "drive-letter-pattern")]
+struct ConflictingAliases {
+    #[facet(args::named, args::alias = "drive-letter-pattern")]
     drive: bool,
-    #[facet(args::named, args::long_alias = "drive-letter-pattern")]
+    #[facet(args::named, args::alias = "drive-letter-pattern")]
     letter: bool,
 }
 
@@ -270,8 +270,8 @@ fn snapshot_schema_conflicting_short_flags() {
 }
 
 #[test]
-fn test_schema_long_aliases_are_stored() {
-    let schema = Schema::from_shape(ArgsWithLongAlias::SHAPE).unwrap();
+fn test_schema_aliases_are_stored() {
+    let schema = Schema::from_shape(ArgsWithAlias::SHAPE).unwrap();
     let arg = schema
         .args()
         .args()
@@ -279,14 +279,14 @@ fn test_schema_long_aliases_are_stored() {
         .expect("flag should be found")
         .1;
     assert_eq!(arg.name(), "drive");
-    assert_eq!(arg.long_aliases(), &["drive-letter-pattern".to_string()]);
+    assert_eq!(arg.aliases(), &["drive-letter-pattern".to_string()]);
     assert!(arg.matches_long_flag("drive"));
     assert!(arg.matches_long_flag("drive-letter-pattern"));
 }
 
 #[test]
-fn test_schema_long_alias_conflicts_with_canonical_flag() {
-    let result = Schema::from_shape(ConflictingLongAliasAndCanonical::SHAPE);
+fn test_schema_alias_conflicts_with_canonical_flag() {
+    let result = Schema::from_shape(ConflictingAliasAndCanonical::SHAPE);
     let err = result.unwrap_err().to_string();
     assert!(
         err.contains("duplicate flag `--port`"),
@@ -295,18 +295,18 @@ fn test_schema_long_alias_conflicts_with_canonical_flag() {
 }
 
 #[test]
-fn test_schema_duplicate_long_alias_on_same_field_is_rejected() {
-    let result = Schema::from_shape(DuplicateLongAliasOnField::SHAPE);
+fn test_schema_duplicate_alias_on_same_field_is_rejected() {
+    let result = Schema::from_shape(DuplicateAliasOnField::SHAPE);
     let err = result.unwrap_err().to_string();
     assert!(
-        err.contains("duplicate long alias `--drive-letter-pattern`"),
+        err.contains("duplicate alias `--drive-letter-pattern`"),
         "unexpected error: {err}"
     );
 }
 
 #[test]
-fn test_schema_duplicate_long_alias_across_fields_is_rejected() {
-    let result = Schema::from_shape(ConflictingLongAliases::SHAPE);
+fn test_schema_duplicate_alias_across_fields_is_rejected() {
+    let result = Schema::from_shape(ConflictingAliases::SHAPE);
     let err = result.unwrap_err().to_string();
     assert!(
         err.contains("duplicate flag `--drive-letter-pattern`"),
@@ -725,3 +725,4 @@ fn test_subcommand_alias_conflict_with_other_alias_detected() {
         err
     );
 }
+

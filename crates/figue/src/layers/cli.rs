@@ -2783,11 +2783,11 @@ mod tests {
         #[facet(
             args::named,
             rename = "drive",
-            args::long_alias = "drive-letter-pattern"
+            args::alias = "drive-letter-pattern"
         )]
         drive_letter_pattern: bool,
 
-        #[facet(args::named, rename = "log-path", args::long_alias = "log-file")]
+        #[facet(args::named, rename = "log-path", args::alias = "log-file")]
         log_path: Option<String>,
     }
 
@@ -2801,7 +2801,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cv_long_alias_bool_uses_canonical_field() {
+    fn test_cv_alias_bool_uses_canonical_field() {
         assert_parses_to::<AliasedLongFlags>(
             &["--drive-letter-pattern"],
             cv::object([("drive", cv::bool(true, "--drive-letter-pattern"))]),
@@ -2809,7 +2809,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cv_long_alias_value_uses_canonical_field() {
+    fn test_cv_alias_value_uses_canonical_field() {
         assert_parses_to::<AliasedLongFlags>(
             &["--log-file", "/tmp/app.log"],
             cv::object([("log-path", cv::string("/tmp/app.log", "--log-file"))]),
@@ -2817,7 +2817,7 @@ mod tests {
     }
 
     #[test]
-    fn test_long_alias_unknown_flag_suggestion_uses_aliases() {
+    fn test_alias_unknown_flag_suggestion_uses_aliases() {
         assert_diagnostic_contains::<AliasedLongFlags>(
             &["--drive-letter-patern"],
             "Did you mean '--drive-letter-pattern'?",
@@ -3352,7 +3352,7 @@ mod tests {
         #[facet(
             args::named,
             rename = "drive",
-            args::long_alias = "drive-letter-pattern"
+            args::alias = "drive-letter-pattern"
         )]
         drive_letter_pattern: bool,
 
@@ -3428,7 +3428,7 @@ mod tests {
     }
 
     #[test]
-    fn test_adoption_long_alias_after_subcommand_bubbles_up() {
+    fn test_adoption_alias_after_subcommand_bubbles_up() {
         assert_parses_to::<ParentWithAliasedGlobalFlag>(
             &["build", "--drive-letter-pattern"],
             cv::object([
@@ -3833,3 +3833,4 @@ mod tests {
         );
     }
 }
+

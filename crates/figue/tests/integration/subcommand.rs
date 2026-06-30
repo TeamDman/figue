@@ -213,7 +213,7 @@ fn test_subcommand_kebab_case() {
 
 /// Test long-form subcommand aliases resolve to the canonical variant.
 #[test]
-fn test_subcommand_long_alias() {
+fn test_subcommand_alias() {
     #[derive(Facet, Debug, PartialEq)]
     struct ProfileArgs {
         #[facet(args::named, default)]

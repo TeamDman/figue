@@ -2828,12 +2828,12 @@ mod tests {
     }
 
     #[derive(Facet)]
-    struct ArgsWithLongAlias {
+    struct ArgsWithAlias {
         /// Drive selector
         #[facet(
             args::named,
             rename = "drive",
-            args::long_alias = "drive-letter-pattern"
+            args::alias = "drive-letter-pattern"
         )]
         drive_letter_pattern: Option<String>,
     }
@@ -2879,8 +2879,8 @@ mod tests {
     }
 
     #[test]
-    fn test_help_shows_long_aliases_after_canonical_name() {
-        let schema = Schema::from_shape(ArgsWithLongAlias::SHAPE).unwrap();
+    fn test_help_shows_aliases_after_canonical_name() {
+        let schema = Schema::from_shape(ArgsWithAlias::SHAPE).unwrap();
         let help = generate_help_for_subcommand(&schema, &[], &HelpConfig::default());
 
         assert!(
@@ -3514,3 +3514,4 @@ mod tests {
         assert_eq!(help.matches("--[no-]verbose").count(), 1);
     }
 }
+

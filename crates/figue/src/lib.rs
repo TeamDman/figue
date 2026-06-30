@@ -130,12 +130,12 @@
 //! | `args::positional` | Mark field as positional argument |
 //! | `args::named` | Mark field as named flag (--flag) |
 //! | `args::short = 'x'` | Add short flag (-x) |
-//! | `args::alias = "x"` | Add an extra long-form subcommand alias |
+//! | `args::alias = "x"` | Add an extra accepted CLI alias (flag or subcommand) |
 //! | `args::counted` | Count occurrences (-vvv = 3) |
 //! | `args::subcommand` | Mark field as subcommand selector |
 //! | `args::config` | Mark field as layered config struct |
 //! | `args::env_prefix = "X"` | Set env var prefix for config |
-//! | `args::long_alias = "old-name"` | Add compatibility long flag alias |
+//! | `args::alias = "old-name"` | Add compatibility long flag alias |
 //! | `args::help` | Mark as help flag (exits with code 0) |
 //! | `args::version` | Mark as version flag (exits with code 0) |
 //! | `args::completions` | Mark as shell completions flag |
@@ -609,3 +609,5 @@ mod tests {
         );
     }
 }
+
+

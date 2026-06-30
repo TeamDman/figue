@@ -645,7 +645,7 @@ fn arg_to_flag(name: &str, arg: &ArgSchema) -> FlagInfo {
     FlagInfo {
         // Use kebab-case for the CLI flag name
         long: name.to_kebab_case(),
-        aliases: arg.long_aliases().to_vec(),
+        aliases: arg.aliases().to_vec(),
         short: arg.kind().short(),
         doc: arg.docs().summary().map(|s| s.trim().to_string()),
         value_mode,
@@ -735,12 +735,12 @@ mod tests {
     }
 
     #[derive(Facet)]
-    struct ArgsWithLongAlias {
+    struct ArgsWithAlias {
         /// Drive selector
         #[facet(
             args::named,
             rename = "drive",
-            args::long_alias = "drive-letter-pattern"
+            args::alias = "drive-letter-pattern"
         )]
         drive_letter_pattern: Option<String>,
     }
@@ -772,8 +772,8 @@ mod tests {
     }
 
     #[test]
-    fn test_long_aliases_appear_in_bash_completions() {
-        let schema = Schema::from_shape(ArgsWithLongAlias::SHAPE).unwrap();
+    fn test_aliases_appear_in_bash_completions() {
+        let schema = Schema::from_shape(ArgsWithAlias::SHAPE).unwrap();
         let completions = generate_completions_for_schema(&schema, Shell::Bash, "myapp");
 
         assert!(completions.contains("--drive"));
@@ -781,8 +781,8 @@ mod tests {
     }
 
     #[test]
-    fn test_long_aliases_appear_in_fish_completions() {
-        let schema = Schema::from_shape(ArgsWithLongAlias::SHAPE).unwrap();
+    fn test_aliases_appear_in_fish_completions() {
+        let schema = Schema::from_shape(ArgsWithAlias::SHAPE).unwrap();
         let completions = generate_completions_for_schema(&schema, Shell::Fish, "myapp");
 
         assert!(completions.contains(" -l drive"));
@@ -1082,3 +1082,4 @@ mod tests {
         );
     }
 }
+

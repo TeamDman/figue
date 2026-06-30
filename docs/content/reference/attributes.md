@@ -33,7 +33,7 @@ Create a `--long-flag` (field name in kebab-case). Combine with `args::short`,
 out_dir: String, // --out-dir
 ```
 
-### `args::long_alias = "old-name"`
+### `args::alias = "old-name"`
 
 Add an additional accepted long-form flag spelling for a named argument.
 Repeatable. The canonical long name still comes from the field name (or
@@ -44,7 +44,7 @@ boolean `--no-...` negation.
 #[facet(
     args::named,
     rename = "drive",
-    args::long_alias = "drive-letter-pattern",
+    args::alias = "drive-letter-pattern",
 )]
 drive: Option<String>, // --drive and --drive-letter-pattern
 ```

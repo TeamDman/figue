@@ -89,7 +89,7 @@ struct Args {
 
 ## Long-form flag aliases
 
-Add `#[facet(args::long_alias = "...")]` when a named argument should accept an
+Add `#[facet(args::alias = "...")]` when a named argument should accept an
 older or alternate flag spelling too:
 
 ```rust,noexec
@@ -98,7 +98,7 @@ struct Args {
     #[facet(
         args::named,
         rename = "drive",
-        args::long_alias = "drive-letter-pattern",
+        args::alias = "drive-letter-pattern",
     )]
     drive: Option<String>,
 }

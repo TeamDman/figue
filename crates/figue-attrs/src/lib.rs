@@ -43,9 +43,11 @@ facet::define_attr_grammar! {
         ///
         /// Usage: `#[facet(args::short = 'v')]` or just `#[facet(args::short)]`
         Short(Option<char>),
-        /// Specifies an additional long-form alias for a subcommand variant.
+        /// Specifies an additional CLI alias.
         ///
-        /// The alias is accepted in addition to the canonical subcommand name.
+        /// On named fields, this adds an extra long-form flag spelling such as
+        /// `--old-name` alongside the canonical `--new-name`.
+        /// On subcommand enum variants, this adds an extra accepted subcommand token.
         ///
         /// Multiple aliases can be specified by repeating the attribute.
         ///
@@ -112,23 +114,7 @@ facet::define_attr_grammar! {
         /// }
         /// ```
         EnvAlias(&'static str),
-        /// Specifies an additional long-form CLI flag name for a named argument.
-        ///
-        /// This allows a field to keep one canonical long flag while accepting
-        /// compatibility aliases on the CLI. Multiple aliases can be specified
-        /// by using the attribute multiple times.
-        ///
-        /// Usage: `#[facet(args::long_alias = "drive-letter-pattern")]`
-        ///
-        /// Example:
-        /// ```ignore
-        /// #[derive(Facet)]
-        /// struct Args {
-        ///     #[facet(args::named, rename = "drive", args::long_alias = "drive-letter-pattern")]
-        ///     drive: Option<String>,
-        /// }
-        /// ```
-        LongAlias(&'static str),
+
         /// Enables environment variable substitution for this field.
         ///
         /// When enabled, `${VAR}` patterns in the field's value will be replaced
@@ -225,3 +211,4 @@ facet::define_attr_grammar! {
         Label(&'static str),
    }
 }
+

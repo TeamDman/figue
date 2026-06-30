@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- first-class long-form CLI flag aliases for named args via `args::long_alias`
+- first-class CLI aliases for named args via `args::alias`
 
 ### Changed
 
@@ -104,3 +104,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Use kebab-case for flag names in help text ([#76](https://github.com/bearcove/figue/pull/76))
 - Support short subcommand aliases as positional tokens ([#78](https://github.com/bearcove/figue/pull/78))
+

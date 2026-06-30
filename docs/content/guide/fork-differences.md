@@ -35,13 +35,13 @@ figue = { package = "teamy-figue", version = "5" }
 
 ### Long-form CLI flag aliases for named args
 
-The fork supports repeatable `args::long_alias` attributes on named arguments:
+The fork supports repeatable `args::alias` attributes on named arguments:
 
 ```rust,noexec
 #[facet(
     args::named,
     rename = "drive",
-    args::long_alias = "drive-letter-pattern",
+    args::alias = "drive-letter-pattern",
 )]
 drive: Option<String>,
 ```

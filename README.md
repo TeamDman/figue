@@ -4,8 +4,8 @@ I am publishing this fork so I can publish `teamy-mft`, which depends on fork-sp
 
 Notable differences in this fork include:
 
-- first-class long-form CLI flag aliases for named args via `#[facet(args::long_alias = "...")]`
-- long-form subcommand aliases via `#[facet(args::alias = "...")]`
+- first-class CLI aliases for named args via `#[facet(args::alias = "...")]`
+- subcommand aliases via `#[facet(args::alias = "...")]`
 - optional-value named args via `Option<Option<T>>`, so `--parallel`,
   `--parallel=12`, and an absent flag are distinct states
 - schema-driven `to_args` support and roundtrip helpers
@@ -134,3 +134,4 @@ Licensed under either of:
 - MIT license ([LICENSE-MIT](https://github.com/bearcove/figue/blob/main/LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
 
 at your option.
+

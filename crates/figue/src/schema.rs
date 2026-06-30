@@ -319,7 +319,7 @@ pub struct ArgSchema {
     /// Additional accepted long-form CLI flag names for this argument.
     ///
     /// These are stored in kebab-case without the leading `--`.
-    long_aliases: Vec<String>,
+    aliases: Vec<String>,
 
     /// Path where this argument writes in ConfigValue.
     ///
@@ -708,9 +708,9 @@ impl ArgSchema {
         }
     }
 
-    /// Get the additional long-form CLI flag aliases for this argument.
-    pub fn long_aliases(&self) -> &[String] {
-        &self.long_aliases
+    /// Get the additional accepted long-form CLI flag aliases for this argument.
+    pub fn aliases(&self) -> &[String] {
+        &self.aliases
     }
 
     /// Iterate over all accepted long-form CLI flag names for this argument.
@@ -719,13 +719,13 @@ impl ArgSchema {
     pub fn long_flag_names(&self) -> impl Iterator<Item = String> + '_ {
         self.long_name()
             .into_iter()
-            .chain(self.long_aliases.iter().cloned())
+            .chain(self.aliases.iter().cloned())
     }
 
     /// Check whether this argument accepts the given long-form CLI flag name.
     pub fn matches_long_flag(&self, flag_name: &str) -> bool {
         self.long_name().as_deref() == Some(flag_name)
-            || self.long_aliases.iter().any(|alias| alias == flag_name)
+            || self.aliases.iter().any(|alias| alias == flag_name)
     }
 
     /// Get the value schema.
@@ -1125,3 +1125,4 @@ impl ValueSchema {
 #[cfg(test)]
 #[allow(dead_code)]
 mod tests;
+

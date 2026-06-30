@@ -87,10 +87,10 @@ impl PartialEq for Cli {
 struct GlobalArgs {
     /// Enable extra diagnostics.
     ///
-    /// `args::long_alias` is fork-specific. Both `--debug` and the legacy
+    /// `args::alias` is fork-specific. Both `--debug` and the legacy
     /// `--trace` spelling parse into this field. The canonical spelling remains
     /// `--debug`, so generated help and `ToArgs` prefer that spelling.
-    #[facet(args::named, default, args::long_alias = "trace")]
+    #[facet(args::named, default, args::alias = "trace")]
     debug: bool,
 
     /// Tracing filter directive.
@@ -100,8 +100,8 @@ struct GlobalArgs {
     #[facet(
         args::named,
         default,
-        args::long_alias = "log-level",
-        args::long_alias = "tracing-filter"
+        args::alias = "log-level",
+        args::alias = "tracing-filter"
     )]
     log_filter: Option<String>,
 
@@ -230,7 +230,7 @@ enum DefaultShellAction {
         /// `BranchSelector` is a transparent newtype, so the CLI accepts this as
         /// a normal string-like value while the application still receives a
         /// domain type. `--workspace` is a compatibility alias for `--branch`.
-        #[facet(args::named, default, args::long_alias = "workspace")]
+        #[facet(args::named, default, args::alias = "workspace")]
         branch: BranchSelector,
 
         /// Shell executable, such as `pwsh` or `cmd`.
@@ -247,7 +247,7 @@ enum DefaultShellAction {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 struct OpenTerminalArgs {
     /// Optional terminal title.
-    #[facet(args::named, default, args::long_alias = "window-title")]
+    #[facet(args::named, default, args::alias = "window-title")]
     title: Option<String>,
 
     /// Attach stdin to the new terminal.
@@ -393,7 +393,7 @@ fn demonstrate_optional_value_named_arg() -> Result<(), Box<dyn std::error::Erro
 #[derive(Facet, Debug)]
 struct ColourCli {
     /// Use colour output.
-    #[facet(args::named, default = true, args::long_alias = "colour")]
+    #[facet(args::named, default = true, args::alias = "colour")]
     color: bool,
 }
 
@@ -542,3 +542,4 @@ fn demonstrate_optional_arbitrary_helpers() -> Result<(), Box<dyn std::error::Er
 
     Ok(())
 }
+
