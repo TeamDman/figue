@@ -837,7 +837,7 @@ fn variant_fields_for_schema(variant: &Variant) -> &'static [Field] {
 fn is_flattened_tuple_variant(variant: &Variant) -> bool {
     let fields = variant.data.fields;
     fields.len() == 1
-        && fields[0].is_flattened()
+        && (fields[0].name.chars().all(|c| c.is_ascii_digit()) || fields[0].is_flattened())
         && matches!(fields[0].shape().ty, Type::User(UserType::Struct(_)))
 }
 
