@@ -77,6 +77,40 @@ struct ListProxyArgs {
     values: Vec<String>,
 }
 
+#[derive(Debug, Facet, PartialEq, Eq)]
+#[facet(transparent)]
+struct OptionalOptionsProxy(String);
+
+impl TryFrom<OptionalOptionsProxy> for Option<Options> {
+    type Error = String;
+
+    fn try_from(value: OptionalOptionsProxy) -> Result<Self, Self::Error> {
+        if value.0.is_empty() {
+            Ok(None)
+        } else {
+            Options::try_from(value.0).map(Some)
+        }
+    }
+}
+
+impl TryFrom<&Option<Options>> for OptionalOptionsProxy {
+    type Error = String;
+
+    fn try_from(value: &Option<Options>) -> Result<Self, Self::Error> {
+        value
+            .as_ref()
+            .map(String::try_from)
+            .transpose()
+            .map(|value| Self(value.unwrap_or_default()))
+    }
+}
+
+#[derive(Debug, Facet, PartialEq, Eq)]
+struct OptionalProxyArgs {
+    #[facet(args::named, proxy = OptionalOptionsProxy)]
+    options: Option<Options>,
+}
+
 #[test]
 fn field_proxy_prefers_figue_specific_representation_at_runtime() {
     let parsed: FigueSpecificProxyArgs = args::from_slice(&["--options"]).unwrap();
@@ -100,4 +134,13 @@ fn field_proxy_representation_is_preserved_during_runtime_coercion() {
     let parsed: ListProxyArgs = args::from_slice(&["--values", "alpha"]).unwrap();
 
     assert_eq!(parsed.values, ["alpha"]);
+}
+
+#[test]
+fn field_proxy_preserves_optional_presence_at_runtime() {
+    let omitted: OptionalProxyArgs = args::from_slice(&[]).unwrap();
+    assert_eq!(omitted.options, None);
+
+    let supplied: OptionalProxyArgs = args::from_slice(&["--options", "enabled"]).unwrap();
+    assert_eq!(supplied.options, Some(Options { enabled: true }));
 }
