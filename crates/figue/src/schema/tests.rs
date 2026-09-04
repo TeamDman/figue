@@ -582,6 +582,149 @@ struct ArgsWithUnflattenedStruct {
     options: NestedOptions, // ERROR: struct fields must use flatten
 }
 
+impl TryFrom<String> for NestedOptions {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Ok(Self {
+            verbose: value == "verbose",
+        })
+    }
+}
+
+impl TryFrom<&NestedOptions> for String {
+    type Error = String;
+
+    fn try_from(value: &NestedOptions) -> Result<Self, Self::Error> {
+        Ok(value
+            .verbose
+            .then_some("verbose")
+            .unwrap_or_default()
+            .to_string())
+    }
+}
+
+impl TryFrom<bool> for NestedOptions {
+    type Error = String;
+
+    fn try_from(verbose: bool) -> Result<Self, Self::Error> {
+        Ok(Self { verbose })
+    }
+}
+
+impl TryFrom<&NestedOptions> for bool {
+    type Error = String;
+
+    fn try_from(value: &NestedOptions) -> Result<Self, Self::Error> {
+        Ok(value.verbose)
+    }
+}
+
+#[derive(Facet)]
+struct ArgsWithGenericFieldProxy {
+    #[facet(args::positional, proxy = String)]
+    options: NestedOptions,
+}
+
+#[derive(Facet)]
+struct ArgsWithFigueFieldProxy {
+    #[facet(args::named, proxy = String, figue::proxy = bool)]
+    options: NestedOptions,
+}
+
+#[derive(Facet)]
+struct ConfigWithGenericFieldProxy {
+    #[facet(proxy = String)]
+    options: NestedOptions,
+}
+
+#[derive(Facet)]
+struct ArgsWithGenericConfigFieldProxy {
+    #[facet(args::config)]
+    config: ConfigWithGenericFieldProxy,
+}
+
+#[derive(Facet)]
+#[repr(u8)]
+enum ConfigEnumWithGenericFieldProxy {
+    Selected {
+        #[facet(proxy = String)]
+        options: NestedOptions,
+    },
+}
+
+#[derive(Facet)]
+struct ConfigWithEnumFieldProxy {
+    selection: ConfigEnumWithGenericFieldProxy,
+}
+
+#[derive(Facet)]
+struct ArgsWithEnumConfigFieldProxy {
+    #[facet(args::config)]
+    config: ConfigWithEnumFieldProxy,
+}
+
+#[derive(Facet)]
+#[facet(transparent)]
+struct OptionalOptionsProxy(String);
+
+impl TryFrom<OptionalOptionsProxy> for Option<NestedOptions> {
+    type Error = String;
+
+    fn try_from(value: OptionalOptionsProxy) -> Result<Self, Self::Error> {
+        Ok(Some(NestedOptions::try_from(value.0)?))
+    }
+}
+
+impl TryFrom<&Option<NestedOptions>> for OptionalOptionsProxy {
+    type Error = String;
+
+    fn try_from(value: &Option<NestedOptions>) -> Result<Self, Self::Error> {
+        let value = value
+            .as_ref()
+            .map(String::try_from)
+            .transpose()?
+            .unwrap_or_default();
+        Ok(Self(value))
+    }
+}
+
+#[derive(Facet)]
+struct ArgsWithOptionalFieldProxy {
+    #[facet(args::named, proxy = OptionalOptionsProxy)]
+    options: Option<NestedOptions>,
+}
+
+#[derive(Facet)]
+struct ConfigWithOptionalFieldProxy {
+    #[facet(proxy = OptionalOptionsProxy)]
+    options: Option<NestedOptions>,
+}
+
+#[derive(Facet)]
+struct ArgsWithOptionalConfigFieldProxy {
+    #[facet(args::config)]
+    config: ConfigWithOptionalFieldProxy,
+}
+
+#[derive(Facet)]
+struct ArgsWithFlattenedFieldProxy {
+    #[facet(flatten, proxy = String)]
+    options: NestedOptions,
+}
+
+#[derive(Facet)]
+struct ConfigWithFlattenedFieldProxy {
+    #[facet(flatten, proxy = String)]
+    options: NestedOptions,
+}
+
+#[derive(Facet)]
+struct ArgsWithFlattenedConfigFieldProxy {
+    #[facet(args::config)]
+    config: ConfigWithFlattenedFieldProxy,
+}
+
 #[derive(Facet)]
 #[facet(transparent)]
 struct TransparentPattern(String);
@@ -613,6 +756,136 @@ fn test_transparent_newtype_arg_is_allowed() {
         schema.args().args.contains_key("pattern"),
         "transparent newtype field should appear as a regular named arg"
     );
+}
+
+#[test]
+fn field_proxy_makes_a_struct_positional_argument_a_scalar() {
+    let schema = Schema::from_shape(ArgsWithGenericFieldProxy::SHAPE)
+        .expect("a field proxy should make a struct usable as a positional argument");
+    let arg = schema
+        .args()
+        .args()
+        .iter()
+        .find(|(name, _)| name.as_str() == "options")
+        .expect("positional argument should be present")
+        .1;
+
+    assert_eq!(arg.value().type_identifier(), String::SHAPE.type_identifier);
+    assert!(!matches!(arg.value(), ValueSchema::Struct { .. }));
+}
+
+#[test]
+fn field_proxy_prefers_figue_specific_representation() {
+    let schema = Schema::from_shape(ArgsWithFigueFieldProxy::SHAPE)
+        .expect("the Figue-specific field proxy should build a schema");
+    let arg = schema
+        .args()
+        .args()
+        .get("options")
+        .expect("named argument should be present")
+        .1;
+
+    assert!(arg.value().is_bool());
+}
+
+#[test]
+fn field_proxy_is_used_for_nested_config_values() {
+    let schema = Schema::from_shape(ArgsWithGenericConfigFieldProxy::SHAPE)
+        .expect("a config field proxy should build a schema");
+    let value = schema
+        .configs()
+        .first()
+        .expect("config root should be present")
+        .fields()
+        .get("options")
+        .expect("config field should be present")
+        .value();
+
+    assert_eq!(value.type_identifier(), String::SHAPE.type_identifier);
+    assert!(!matches!(value, ConfigValueSchema::Struct(_)));
+}
+
+#[test]
+fn field_proxy_is_used_for_config_enum_variant_values() {
+    let schema = Schema::from_shape(ArgsWithEnumConfigFieldProxy::SHAPE)
+        .expect("a config enum field proxy should build a schema");
+    let ConfigValueSchema::Enum(selection) = schema
+        .configs()
+        .first()
+        .expect("config root should be present")
+        .fields()
+        .get("selection")
+        .expect("enum config field should be present")
+        .value()
+    else {
+        panic!("selection should use an enum config schema");
+    };
+    let value = selection
+        .variants()
+        .values()
+        .next()
+        .expect("enum variant should be present")
+        .fields()
+        .get("options")
+        .expect("variant field should be present")
+        .value();
+
+    assert_eq!(value.type_identifier(), String::SHAPE.type_identifier);
+}
+
+#[test]
+fn field_proxy_preserves_optional_argument_presence() {
+    let schema = Schema::from_shape(ArgsWithOptionalFieldProxy::SHAPE)
+        .expect("an optional field proxy should build a schema");
+    let arg = schema
+        .args()
+        .args()
+        .get("options")
+        .expect("named argument should be present")
+        .1;
+
+    assert!(arg.value().is_option());
+    assert!(!arg.required());
+    assert_eq!(
+        arg.value().inner_if_option().type_identifier(),
+        String::SHAPE.type_identifier
+    );
+}
+
+#[test]
+fn field_proxy_preserves_optional_config_presence() {
+    let schema = Schema::from_shape(ArgsWithOptionalConfigFieldProxy::SHAPE)
+        .expect("an optional config field proxy should build a schema");
+    let value = schema
+        .configs()
+        .first()
+        .expect("config root should be present")
+        .fields()
+        .get("options")
+        .expect("config field should be present")
+        .value();
+
+    assert!(value.is_option());
+    assert_eq!(
+        value.inner_if_option().type_identifier(),
+        String::SHAPE.type_identifier
+    );
+}
+
+#[test]
+fn field_proxy_is_rejected_when_flattening_args() {
+    let err = Schema::from_shape(ArgsWithFlattenedFieldProxy::SHAPE)
+        .expect_err("a direct field proxy cannot be flattened");
+
+    assert!(err.to_string().contains("cannot use a field-level proxy"));
+}
+
+#[test]
+fn field_proxy_is_rejected_when_flattening_config() {
+    let err = Schema::from_shape(ArgsWithFlattenedConfigFieldProxy::SHAPE)
+        .expect_err("a direct field proxy cannot be flattened");
+
+    assert!(err.to_string().contains("cannot use a field-level proxy"));
 }
 
 // ============================================================================

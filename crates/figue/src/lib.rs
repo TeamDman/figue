@@ -155,6 +155,9 @@
 
 extern crate self as figue;
 
+/// Facet format namespace used by Figue's schema, parser, and serializer.
+pub(crate) const FORMAT_NAMESPACE: &str = "figue";
+
 // Re-export attribute macros from figue-attrs.
 // This allows users to write `#[facet(figue::named)]` or `use figue as args; #[facet(args::named)]`
 pub use figue_attrs::*;

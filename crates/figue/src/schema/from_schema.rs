@@ -36,11 +36,16 @@ impl Schema {
 
         let mut configs = Vec::new();
         for (field, field_ctx) in config_fields {
-            let shape = field.shape();
-            let optional_root = matches!(shape.def, Def::Option(_));
-            let config_shape = match shape.def {
+            if field.is_flattened() {
+                validate_flattened_field_proxy(field, &field_ctx)?;
+            }
+
+            let storage_shape = field.shape();
+            let optional_root = matches!(storage_shape.def, Def::Option(_));
+            let schema_shape = schema_shape_for_field(field);
+            let config_shape = match schema_shape.def {
                 Def::Option(opt) => opt.t,
-                _ => shape,
+                _ => schema_shape,
             };
             // Extract env_prefix from the config field's attributes
             let env_prefix = extract_env_prefix(field);
@@ -76,6 +81,58 @@ fn has_any_args_attr(field: &Field) -> bool {
         || field.has_attr(Some("args"), "counted")
         || field.has_attr(Some("args"), "env_prefix")
         || field.is_flattened()
+}
+
+/// Resolve a shape's representation in Figue's format namespace.
+///
+/// Shape-level proxies are part of a type's representation and can therefore
+/// participate in structural schema traversal.
+fn schema_shape_for_shape(shape: &'static Shape) -> &'static Shape {
+    shape
+        .effective_proxy(Some(crate::FORMAT_NAMESPACE))
+        .map(|proxy| proxy.shape)
+        .unwrap_or(shape)
+}
+
+/// Return the shape of the value that Figue receives for a field.
+///
+/// A field-level Facet proxy describes the field's external representation.  Schema
+/// construction must use that representation rather than the field's storage type:
+/// for example, a struct field with `#[facet(proxy = String)]` is a scalar command
+/// line argument.  Resolve the Figue-specific proxy first, with Facet's normal
+/// fallback to the format-agnostic proxy.
+fn schema_shape_for_field(field: &Field) -> &'static Shape {
+    let shape = field
+        .effective_proxy(Some(crate::FORMAT_NAMESPACE))
+        .map(|proxy| proxy.shape)
+        .unwrap_or_else(|| field.shape());
+
+    schema_shape_for_shape(shape)
+}
+
+/// Field-level proxies describe a value at one field boundary.  Flattening instead
+/// exposes the field's structural children, so Facet does not support combining the
+/// two operations.  Type-level proxies remain valid because they describe the
+/// flattened field's representation itself.
+fn validate_flattened_field_proxy(
+    field: &Field,
+    ctx: &SchemaErrorContext,
+) -> Result<(), SchemaError> {
+    if field
+        .effective_proxy(Some(crate::FORMAT_NAMESPACE))
+        .is_some()
+    {
+        return Err(SchemaError::new(
+            ctx.clone(),
+            format!(
+                "flattened field `{}` cannot use a field-level proxy",
+                field.name
+            ),
+        )
+        .with_primary_label("remove either #[facet(flatten)] or #[facet(proxy = ...)]"));
+    }
+
+    Ok(())
 }
 
 /// Extract the env_prefix value from a field's `#[facet(args::env_prefix = "...")]` attribute.
@@ -124,7 +181,8 @@ fn discover_config_fields(
         }
 
         if field.is_flattened() {
-            let inner_shape = field.shape();
+            validate_flattened_field_proxy(field, &field_ctx)?;
+            let inner_shape = schema_shape_for_shape(field.shape());
             let Type::User(UserType::Struct(struct_type)) = inner_shape.ty else {
                 return Err(SchemaError::new(
                     field_ctx,
@@ -140,7 +198,7 @@ fn discover_config_fields(
         }
 
         if field.has_attr(Some("args"), "subcommand") {
-            let field_shape = field.shape();
+            let field_shape = schema_shape_for_field(field);
             let (enum_shape, enum_type) = match field_shape.def {
                 Def::Option(opt) => match opt.t.ty {
                     Type::User(UserType::Enum(enum_type)) => (opt.t, enum_type),
@@ -406,6 +464,11 @@ fn value_schema_from_shape(
     shape: &'static Shape,
     ctx: &SchemaErrorContext,
 ) -> Result<ValueSchema, SchemaError> {
+    let schema_shape = schema_shape_for_shape(shape);
+    if !std::ptr::eq(schema_shape, shape) {
+        return value_schema_from_shape(schema_shape, ctx);
+    }
+
     if shape.is_transparent()
         && let Some(inner) = shape.inner
         && !std::ptr::eq(inner, shape)
@@ -440,10 +503,34 @@ fn value_schema_from_shape(
     }
 }
 
+/// Build the external schema for a field while retaining `Option<T>` presence
+/// semantics from its storage type.  A proxy controls the representation of a
+/// supplied value, but omitting an optional target field must still produce `None`.
+fn value_schema_from_field(
+    field: &Field,
+    ctx: &SchemaErrorContext,
+) -> Result<ValueSchema, SchemaError> {
+    let value = value_schema_from_shape(schema_shape_for_field(field), ctx)?;
+
+    if matches!(field.shape().def, Def::Option(_)) && !value.is_option() {
+        Ok(ValueSchema::Option {
+            value: Box::new(value),
+            shape: field.shape(),
+        })
+    } else {
+        Ok(value)
+    }
+}
+
 fn config_value_schema_from_shape(
     shape: &'static Shape,
     ctx: &SchemaErrorContext,
 ) -> Result<ConfigValueSchema, SchemaError> {
+    let schema_shape = schema_shape_for_shape(shape);
+    if !std::ptr::eq(schema_shape, shape) {
+        return config_value_schema_from_shape(schema_shape, ctx);
+    }
+
     if shape.is_transparent()
         && let Some(inner) = shape.inner
         && !std::ptr::eq(inner, shape)
@@ -477,6 +564,23 @@ fn config_value_schema_from_shape(
             )),
             _ => Ok(ConfigValueSchema::Leaf(leaf_schema_from_shape(shape, ctx)?)),
         },
+    }
+}
+
+/// Config counterpart to [`value_schema_from_field`].
+fn config_value_schema_from_field(
+    field: &Field,
+    ctx: &SchemaErrorContext,
+) -> Result<ConfigValueSchema, SchemaError> {
+    let value = config_value_schema_from_shape(schema_shape_for_field(field), ctx)?;
+
+    if matches!(field.shape().def, Def::Option(_)) && !value.is_option() {
+        Ok(ConfigValueSchema::Option {
+            value: Box::new(value),
+            shape: field.shape(),
+        })
+    } else {
+        Ok(value)
     }
 }
 
@@ -536,7 +640,7 @@ fn config_enum_schema_from_shape(
             let sensitive = field.flags.contains(facet_core::FieldFlags::SENSITIVE);
             let env_aliases = extract_env_aliases(field);
             let env_subst = has_env_subst(field);
-            let value = config_value_schema_from_shape(field.shape(), &field_ctx)?;
+            let value = config_value_schema_from_field(field, &field_ctx)?;
             let default = extract_field_default(field);
 
             fields.insert(
@@ -600,6 +704,8 @@ fn config_struct_schema_from_shape_inner(
     docs: Docs,
     options: ConfigStructBuildOptions,
 ) -> Result<ConfigStructSchema, SchemaError> {
+    let shape = schema_shape_for_shape(shape);
+
     let ConfigStructBuildOptions {
         field_name,
         env_prefix,
@@ -634,7 +740,8 @@ fn config_struct_schema_from_shape_inner(
 
         // Handle flattened fields - recurse into the inner struct and merge fields
         if field.is_flattened() {
-            let inner_shape = field.shape();
+            validate_flattened_field_proxy(field, &field_ctx)?;
+            let inner_shape = schema_shape_for_shape(field.shape());
             let _inner_struct = match &inner_shape.ty {
                 Type::User(UserType::Struct(s)) => *s,
                 _ => {
@@ -694,7 +801,7 @@ fn config_struct_schema_from_shape_inner(
         let docs = docs_from_lines(field.doc);
         let sensitive = field.flags.contains(facet_core::FieldFlags::SENSITIVE);
         let env_aliases = extract_env_aliases(field);
-        let value = config_value_schema_from_shape(field.shape(), &field_ctx)?;
+        let value = config_value_schema_from_field(field, &field_ctx)?;
         let default = extract_field_default(field);
 
         // env_subst is enabled if:
@@ -824,7 +931,7 @@ fn check_flag_alias_conflicts(
 fn variant_fields_for_schema(variant: &Variant) -> &'static [Field] {
     let fields = variant.data.fields;
     if is_flattened_tuple_variant(variant) {
-        let inner_shape = fields[0].shape();
+        let inner_shape = schema_shape_for_shape(fields[0].shape());
         if let Type::User(UserType::Struct(struct_type)) = inner_shape.ty {
             return struct_type.fields;
         }
@@ -837,8 +944,14 @@ fn variant_fields_for_schema(variant: &Variant) -> &'static [Field] {
 fn is_flattened_tuple_variant(variant: &Variant) -> bool {
     let fields = variant.data.fields;
     fields.len() == 1
+        && fields[0]
+            .effective_proxy(Some(crate::FORMAT_NAMESPACE))
+            .is_none()
         && (fields[0].name.chars().all(|c| c.is_ascii_digit()) || fields[0].is_flattened())
-        && matches!(fields[0].shape().ty, Type::User(UserType::Struct(_)))
+        && matches!(
+            schema_shape_for_shape(fields[0].shape()).ty,
+            Type::User(UserType::Struct(_))
+        )
 }
 
 fn arg_level_from_fields(
@@ -879,11 +992,13 @@ fn arg_level_from_fields_with_prefix(
 
         if is_config_field(field) {
             if field.is_flattened() {
-                let shape = field.shape();
-                let optional_root = matches!(shape.def, Def::Option(_));
-                let config_shape = match shape.def {
+                validate_flattened_field_proxy(field, &field_ctx)?;
+                let storage_shape = field.shape();
+                let optional_root = matches!(storage_shape.def, Def::Option(_));
+                let schema_shape = schema_shape_for_shape(storage_shape);
+                let config_shape = match schema_shape.def {
                     Def::Option(opt) => opt.t,
-                    _ => shape,
+                    _ => schema_shape,
                 };
                 let config_field_name = field.effective_name().to_string();
                 let config_schema = config_struct_schema_from_shape(
@@ -940,7 +1055,8 @@ fn arg_level_from_fields_with_prefix(
 
         // Handle flattened fields - recurse into the inner struct
         if field.is_flattened() {
-            let inner_shape = field.shape();
+            validate_flattened_field_proxy(field, &field_ctx)?;
+            let inner_shape = schema_shape_for_shape(field.shape());
             let struct_type = match &inner_shape.ty {
                 Type::User(UserType::Struct(s)) => *s,
                 _ => {
@@ -1066,7 +1182,7 @@ fn arg_level_from_fields_with_prefix(
             .with_primary_label("has both attributes"));
         }
 
-        if is_counted_field(field) && !is_supported_counted_type(field.shape()) {
+        if is_counted_field(field) && !is_supported_counted_type(schema_shape_for_field(field)) {
             return Err(SchemaError::new(
                 field_ctx,
                 format!(
@@ -1088,7 +1204,7 @@ fn arg_level_from_fields_with_prefix(
             first_subcommand_field = Some(field_ctx.clone());
             subcommand_field_name = Some(field.name.to_string());
 
-            let field_shape = field.shape();
+            let field_shape = schema_shape_for_field(field);
             let (enum_shape, enum_type, is_optional) = match field_shape.def {
                 Def::Option(opt) => match opt.t.ty {
                     Type::User(UserType::Enum(enum_type)) => (opt.t, enum_type, true),
@@ -1234,7 +1350,7 @@ fn arg_level_from_fields_with_prefix(
             ArgKind::Named { short, counted }
         };
 
-        let value = value_schema_from_shape(field.shape(), &field_ctx)?;
+        let value = value_schema_from_field(field, &field_ctx)?;
 
         // Struct types in args must be flattened - CLI can't represent nested structs
         // without dotted path syntax (which is only for args::config fields)
@@ -1252,13 +1368,14 @@ fn arg_level_from_fields_with_prefix(
 
         #[allow(clippy::nonminimal_bool)]
         let required = {
-            let shape = field.shape();
-            !matches!(shape.def, Def::Option(_))
+            let storage_shape = field.shape();
+            let representation_shape = schema_shape_for_field(field);
+            !matches!(storage_shape.def, Def::Option(_))
                 && !field.has_default()
-                && !shape.is_shape(bool::SHAPE)
-                && !(counted && is_supported_counted_type(shape))
+                && !representation_shape.is_shape(bool::SHAPE)
+                && !(counted && is_supported_counted_type(representation_shape))
         };
-        let multiple = counted || matches!(field.shape().def, Def::List(_));
+        let multiple = counted || matches!(schema_shape_for_field(field).def, Def::List(_));
 
         if !is_positional {
             let long = field.effective_name().to_kebab_case();

@@ -1,5 +1,24 @@
 use crate::config_value::{ConfigValue, Sourced};
 
+/// Select the representation that Figue passes to Facet for a shape.
+fn representation_shape(shape: &'static facet_core::Shape) -> &'static facet_core::Shape {
+    shape
+        .effective_proxy(Some(crate::FORMAT_NAMESPACE))
+        .map(|proxy| proxy.shape)
+        .unwrap_or(shape)
+}
+
+/// Select a field's representation, preferring a field-level proxy over the
+/// field type's own proxy.
+fn representation_shape_for_field(field: &facet_core::Field) -> &'static facet_core::Shape {
+    let shape = field
+        .effective_proxy(Some(crate::FORMAT_NAMESPACE))
+        .map(|proxy| proxy.shape)
+        .unwrap_or_else(|| field.shape());
+
+    representation_shape(shape)
+}
+
 /// Coerce ConfigValue types based on the target shape.
 /// This is needed because environment variables always come in as strings,
 /// but we want to display them with their proper types (int, bool, etc.).
@@ -7,6 +26,8 @@ pub(crate) fn coerce_types_from_shape(
     value: &ConfigValue,
     shape: &'static facet_core::Shape,
 ) -> ConfigValue {
+    let shape = representation_shape(shape);
+
     tracing::trace!(
         shape = shape.type_identifier,
         ?value,
@@ -32,7 +53,8 @@ pub(crate) fn coerce_types_from_shape(
             if let facet_core::Type::User(facet_core::UserType::Struct(s)) = &shape.ty {
                 for field in s.fields {
                     if let Some(val) = new_map.get(field.name) {
-                        let coerced = coerce_types_from_shape(val, field.shape.get());
+                        let coerced =
+                            coerce_types_from_shape(val, representation_shape_for_field(field));
                         new_map.insert(field.name.to_string(), coerced);
                     }
                 }
@@ -235,7 +257,7 @@ pub(crate) fn coerce_types_from_shape(
                 == facet_core::StructKind::TupleStruct
                 && variant_fields.len() == 1
             {
-                let inner_shape = variant_fields[0].shape.get();
+                let inner_shape = representation_shape_for_field(&variant_fields[0]);
                 if let facet_core::Type::User(facet_core::UserType::Struct(s)) = &inner_shape.ty {
                     s.fields
                 } else {
@@ -253,18 +275,22 @@ pub(crate) fn coerce_types_from_shape(
                 if field.is_flattened() {
                     // Expand flattened struct fields - their inner fields
                     // appear directly in new_fields, not nested under the field name.
-                    let inner_shape = field.shape.get();
+                    let inner_shape = representation_shape_for_field(field);
                     if let facet_core::Type::User(facet_core::UserType::Struct(s)) = &inner_shape.ty
                     {
                         for inner_field in s.fields {
                             if let Some(val) = new_fields.get(inner_field.name) {
-                                let coerced = coerce_types_from_shape(val, inner_field.shape.get());
+                                let coerced = coerce_types_from_shape(
+                                    val,
+                                    representation_shape_for_field(inner_field),
+                                );
                                 new_fields.insert(inner_field.name.to_string(), coerced);
                             }
                         }
                     }
                 } else if let Some(val) = new_fields.get(field.name) {
-                    let coerced = coerce_types_from_shape(val, field.shape.get());
+                    let coerced =
+                        coerce_types_from_shape(val, representation_shape_for_field(field));
                     new_fields.insert(field.name.to_string(), coerced);
                 }
             }

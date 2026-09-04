@@ -1196,6 +1196,10 @@ impl<'input> ConfigValueParser<'input> {
 }
 
 impl<'input> FormatParser<'input> for ConfigValueParser<'input> {
+    fn format_namespace(&self) -> Option<&'static str> {
+        Some(crate::FORMAT_NAMESPACE)
+    }
+
     fn next_event(&mut self) -> Result<Option<ParseEvent<'input>>, ParseError> {
         // If we have a peeked event, return it
         if let Some(event) = self.peeked.take() {
@@ -1523,6 +1527,10 @@ impl ConfigValueSerializer {
 
 impl facet_format::FormatSerializer for ConfigValueSerializer {
     type Error = String;
+
+    fn format_namespace(&self) -> Option<&'static str> {
+        Some(crate::FORMAT_NAMESPACE)
+    }
 
     fn begin_struct(&mut self) -> Result<(), Self::Error> {
         self.stack.push(BuildFrame::Object {
