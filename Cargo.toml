@@ -19,16 +19,17 @@ upstream_figue = "4.0.3"
 [workspace.dependencies]
 figue-attrs = { path = "crates/figue-attrs", package = "teamy-figue-attrs", version = "=5.2.0" }
 
-# Facet ecosystem
-facet = { version = "0.46", features = ["indexmap", "camino", "net"] }
-facet-core = { version = "0.46" }
+# Facet ecosystem. This is a temporary coherent monorepo integration ref used
+# to test the reflected Cow ownership feature across downstream consumers.
+facet = { git = "https://github.com/TeamDman/facet.git", rev = "2fa5a53d4a0b95e359fdf0c8e34adfdb5d499154", features = ["indexmap", "camino", "net"] }
+facet-core = { git = "https://github.com/TeamDman/facet.git", rev = "2fa5a53d4a0b95e359fdf0c8e34adfdb5d499154" }
 facet-format = { path = "crates/facet-format", package = "teamy-facet-format", version = "=0.47.1-teamy.1" }
-facet-json = { version = "0.46.1" }
-facet-reflect = { version = "0.46" }
-facet-pretty = { version = "0.46" }
-facet-error = { version = "0.46" }
-facet-solver = { version = "0.46" }
-facet-testhelpers = { version = "0.46" }
+facet-json = { git = "https://github.com/TeamDman/facet.git", rev = "2fa5a53d4a0b95e359fdf0c8e34adfdb5d499154" }
+facet-reflect = { git = "https://github.com/TeamDman/facet.git", rev = "2fa5a53d4a0b95e359fdf0c8e34adfdb5d499154" }
+facet-pretty = { git = "https://github.com/TeamDman/facet.git", rev = "2fa5a53d4a0b95e359fdf0c8e34adfdb5d499154" }
+facet-error = { git = "https://github.com/TeamDman/facet.git", rev = "2fa5a53d4a0b95e359fdf0c8e34adfdb5d499154" }
+facet-solver = { git = "https://github.com/TeamDman/facet.git", rev = "2fa5a53d4a0b95e359fdf0c8e34adfdb5d499154" }
+facet-testhelpers = { git = "https://github.com/TeamDman/facet.git", rev = "2fa5a53d4a0b95e359fdf0c8e34adfdb5d499154" }
 
 # External dependencies
 camino = "1.1"

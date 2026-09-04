@@ -682,6 +682,8 @@ impl<'parser, 'input, const BORROW: bool> FormatDeserializer<'parser, 'input, BO
                         SatisfyResult::Solved(handle) => break Some(handle),
                         SatisfyResult::NoMatch => break None,
                         SatisfyResult::Continue => {}
+                        // A new solver result cannot safely select a variant.
+                        _ => break None,
                     }
                 }
             }
@@ -718,6 +720,11 @@ impl<'parser, 'input, const BORROW: bool> FormatDeserializer<'parser, 'input, BO
                                     pending_ambiguous = Some((name.to_string(), fields));
                                 }
                                 KeyResult::Unknown | KeyResult::Unambiguous { .. } => {
+                                    pending_ambiguous = None;
+                                }
+                                // Do not retain a previous ambiguity after an
+                                // unrecognized solver result.
+                                _ => {
                                     pending_ambiguous = None;
                                 }
                             }

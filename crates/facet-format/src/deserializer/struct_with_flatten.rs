@@ -2,10 +2,9 @@ use std::collections::BTreeSet;
 
 use facet_core::{Characteristic, Def};
 use facet_reflect::{FieldCategory, FieldInfo, Partial, VariantSelection};
-use facet_solver::PathSegment;
 
 use super::entry::MetaSource;
-use super::path_navigator::PathNavigator;
+use super::path_navigator::{PathNavigator, field_segments};
 use crate::{
     DeserializeError, DeserializeErrorKind, FieldKey, FormatDeserializer, ParseEventKind,
     ScalarValue, SpanGuard,
@@ -351,16 +350,8 @@ impl<'parser, 'input, const BORROW: bool> FormatDeserializer<'parser, 'input, BO
         catch_all_info: &FieldInfo,
     ) -> Result<Partial<'input, BORROW>, DeserializeError> {
         let _guard = SpanGuard::new(self.last_span);
-        let segments = catch_all_info.path.segments();
-
         // Extract field names from the path
-        let field_segments: Vec<&str> = segments
-            .iter()
-            .filter_map(|s| match s {
-                PathSegment::Field(name) => Some(*name),
-                PathSegment::Variant(_, _) => None,
-            })
-            .collect();
+        let field_segments = field_segments(&catch_all_info.path, self.last_span)?;
 
         // Track opened segments so we can close them
         let mut opened_options: Vec<bool> = Vec::new();

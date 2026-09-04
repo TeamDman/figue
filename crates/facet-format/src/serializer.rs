@@ -2141,7 +2141,9 @@ impl<'s, S: FormatSerializer> SerializeContext<'s, S> {
                         .dynamic_value_tag(DynamicValueTag::DateTime)
                         .map_err(SerializeError::Backend)?;
                 }
-                let s = format_dyn_datetime(dt);
+                let s = format_dyn_datetime(dt).ok_or(SerializeError::Unsupported(
+                    Cow::Borrowed("dynamic datetime kind serialization is not supported"),
+                ))?;
                 self.serializer
                     .scalar(ScalarValue::Str(Cow::Owned(s)))
                     .map_err(SerializeError::Backend)
@@ -2149,6 +2151,11 @@ impl<'s, S: FormatSerializer> SerializeContext<'s, S> {
             DynValueKind::QName | DynValueKind::Uuid => Err(SerializeError::Unsupported(
                 Cow::Borrowed("dynamic QName/Uuid serialization is not supported"),
             )),
+            // A future dynamic representation requires an explicit encoding;
+            // do not serialize it as an unrelated existing kind.
+            _ => Err(SerializeError::Unsupported(Cow::Borrowed(
+                "dynamic value kind serialization is not supported",
+            ))),
         }
     }
 
@@ -2240,7 +2247,7 @@ fn format_dyn_datetime(
         u32,
         DynDateTimeKind,
     ),
-) -> String {
+) -> Option<String> {
     let mut out = String::new();
     match kind {
         DynDateTimeKind::Offset { offset_minutes } => {
@@ -2279,8 +2286,10 @@ fn format_dyn_datetime(
                 let _ = write!(out, ".{:09}", nanos);
             }
         }
+        // A new datetime kind needs an explicit, unambiguous textual encoding.
+        _ => return None,
     }
-    out
+    Some(out)
 }
 
 fn serialize_numeric_enum<S>(

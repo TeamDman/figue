@@ -270,6 +270,10 @@ pub(crate) fn deserialize_map_key_terminal_inner<'input, const BORROW: bool>(
                 wip = wip.set(n)?;
                 return Ok(wip);
             }
+            // A future numeric kind may have a different textual representation.
+            // Fall through to the regular string path instead of guessing how to
+            // parse it as a number.
+            _ => {}
         }
     }
 
@@ -315,6 +319,15 @@ impl<'parser, 'input, const BORROW: bool> FormatDeserializer<'parser, 'input, BO
                 path: None,
                 kind: DeserializeErrorKind::CannotBorrow { reason: message },
             },
+            // `DessertError` is non-exhaustive. Preserve the error as an
+            // unsupported operation until this formatter learns its semantics.
+            _ => DeserializeError {
+                span: Some(self.last_span),
+                path: None,
+                kind: DeserializeErrorKind::Unsupported {
+                    message: format!("unsupported facet-dessert error: {e}").into(),
+                },
+            },
         })
     }
 
@@ -340,6 +353,15 @@ impl<'parser, 'input, const BORROW: bool> FormatDeserializer<'parser, 'input, BO
                 span: None,
                 path: None,
                 kind: DeserializeErrorKind::CannotBorrow { reason: message },
+            },
+            // `DessertError` is non-exhaustive. Preserve the error as an
+            // unsupported operation until this formatter learns its semantics.
+            _ => DeserializeError {
+                span: Some(self.last_span),
+                path: None,
+                kind: DeserializeErrorKind::Unsupported {
+                    message: format!("unsupported facet-dessert error: {e}").into(),
+                },
             },
         })
     }

@@ -324,6 +324,18 @@ impl<'parser, 'input, const BORROW: bool> FormatDeserializer<'parser, 'input, BO
             }
             .with_span(self.last_span)),
 
+            // The strategy comes from a non-exhaustive Facet enum. A new
+            // strategy needs explicit handling here; dispatching it as an
+            // existing strategy could initialize the wrong shape.
+            Some(_) => Err(DeserializeErrorKind::Unsupported {
+                message: format!(
+                    "unsupported deserialization strategy for shape: {:?}",
+                    shape.def
+                )
+                .into(),
+            }
+            .with_span(self.last_span)),
+
             None => {
                 // This should not happen - TypePlan::build errors at allocation time for
                 // unsupported types. If we get here, something went wrong with plan tracking.

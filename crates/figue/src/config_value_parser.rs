@@ -1036,6 +1036,14 @@ pub(crate) fn serialize_default_to_config_value(
                         "Indirect type ops not yet supported for default serialization".to_string(),
                     )?;
                 }
+                // TypeOps is non-exhaustive. A new representation must not be
+                // invoked through the direct raw-pointer contract.
+                _ => {
+                    return Err(format!(
+                        "unsupported type ops for default serialization of {}",
+                        shape.type_identifier
+                    ));
+                }
             }
         }
         DefaultSource::Custom(fn_ptr) => {
@@ -1044,6 +1052,14 @@ pub(crate) fn serialize_default_to_config_value(
                 let ptr_uninit = facet_core::PtrUninit::new_sized(ptr);
                 (*fn_ptr)(ptr_uninit);
             }
+        }
+        // DefaultSource is non-exhaustive. Do not continue to serialize storage
+        // that an unknown source may not have initialized.
+        _ => {
+            return Err(format!(
+                "unsupported default source for {}",
+                shape.type_identifier
+            ));
         }
     }
 

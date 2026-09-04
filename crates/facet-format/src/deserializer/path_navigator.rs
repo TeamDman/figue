@@ -7,7 +7,32 @@ use facet_core::Def;
 use facet_reflect::{FieldPath, Partial, Span, VariantSelection};
 use facet_solver::PathSegment;
 
-use crate::{DeserializeError, SpanGuard};
+use crate::{DeserializeError, DeserializeErrorKind, SpanGuard};
+
+/// Extract the struct fields from a flattened field path.
+///
+/// Variant segments affect enum selection separately. A new path-segment
+/// variant cannot safely be treated as either a field or a variant, so reject
+/// it rather than navigating to an unintended partial value.
+pub(crate) fn field_segments(
+    path: &FieldPath,
+    span: Span,
+) -> Result<Vec<&'static str>, DeserializeError> {
+    let mut fields = Vec::with_capacity(path.segments().len());
+    for segment in path.segments() {
+        match segment {
+            PathSegment::Field(name) => fields.push(*name),
+            PathSegment::Variant(_, _) => {}
+            _ => {
+                return Err(DeserializeErrorKind::Unsupported {
+                    message: "unsupported flattened field path segment".into(),
+                }
+                .with_span(span));
+            }
+        }
+    }
+    Ok(fields)
+}
 
 /// Tracks an open path segment during flatten deserialization.
 #[derive(Debug, Clone)]
@@ -85,14 +110,7 @@ impl<'input, const BORROW: bool> PathNavigator<'input, BORROW> {
         let _guard = SpanGuard::new(self.last_span);
 
         // Extract field names from the path (excluding trailing Variant)
-        let target_fields: Vec<&'static str> = target
-            .segments()
-            .iter()
-            .filter_map(|s| match s {
-                PathSegment::Field(name) => Some(*name),
-                PathSegment::Variant(_, _) => None,
-            })
-            .collect();
+        let target_fields = field_segments(target, self.last_span)?;
 
         // Check if this path ends with a Variant segment
         let trailing_variant = match target.segments().last() {
@@ -170,15 +188,7 @@ impl<'input, const BORROW: bool> PathNavigator<'input, BORROW> {
             .collect();
 
         for vs in variant_selections {
-            let vs_fields: Vec<&str> = vs
-                .path
-                .segments()
-                .iter()
-                .filter_map(|s| match s {
-                    PathSegment::Field(f) => Some(*f),
-                    PathSegment::Variant(_, _) => None,
-                })
-                .collect();
+            let vs_fields = field_segments(&vs.path, self.last_span)?;
 
             trace!(
                 "open_segment: checking variant selection: current_path={:?}, vs_fields={:?}, variant={}",

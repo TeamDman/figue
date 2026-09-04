@@ -69,25 +69,30 @@ version = "0.6"
 optional = true
 
 [dependencies.facet-core]
-version = "0.46"
+git = "https://github.com/TeamDman/facet.git"
+rev = "2fa5a53d4a0b95e359fdf0c8e34adfdb5d499154"
 features = ["alloc"]
 default-features = false
 
 [dependencies.facet-dessert]
-version = "0.46.0"
+git = "https://github.com/TeamDman/facet.git"
+rev = "2fa5a53d4a0b95e359fdf0c8e34adfdb5d499154"
 
 [dependencies.facet-path]
-version = "0.46"
+git = "https://github.com/TeamDman/facet.git"
+rev = "2fa5a53d4a0b95e359fdf0c8e34adfdb5d499154"
 features = ["alloc"]
 default-features = false
 
 [dependencies.facet-reflect]
-version = "0.46"
+git = "https://github.com/TeamDman/facet.git"
+rev = "2fa5a53d4a0b95e359fdf0c8e34adfdb5d499154"
 features = ["alloc"]
 default-features = false
 
 [dependencies.facet-solver]
-version = "0.46"
+git = "https://github.com/TeamDman/facet.git"
+rev = "2fa5a53d4a0b95e359fdf0c8e34adfdb5d499154"
 features = [
     "alloc",
     "suggestions",
