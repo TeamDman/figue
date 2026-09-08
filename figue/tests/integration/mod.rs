@@ -16,5 +16,6 @@ mod subspans;
 mod unknown_keys;
 mod optional_value;
 mod to_args;
+mod transparent;
 #[cfg(feature = "arbitrary")]
 mod arbitrary_checks;

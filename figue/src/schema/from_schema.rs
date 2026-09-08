@@ -344,6 +344,32 @@ fn scalar_kind_from_shape(shape: &'static Shape) -> Option<ScalarType> {
     }
 }
 
+/// Resolve transparent wrappers whose terminal representation is `Def::Scalar`.
+/// Pointer, container, and struct wrappers retain their existing schema behavior.
+fn transparent_scalar_shape(mut shape: &'static Shape) -> Option<&'static Shape> {
+    if !shape.is_transparent() {
+        return None;
+    }
+    while shape.is_transparent() {
+        // A custom representation is not a transparency-only scalar chain.
+        // Leave it to the existing proxy handling rather than bypassing it.
+        if shape.proxy.is_some() {
+            return None;
+        }
+        if let Type::User(UserType::Struct(struct_type)) = shape.ty
+            && struct_type.fields.iter().any(|field| field.proxy.is_some())
+        {
+            return None;
+        }
+        let inner = shape.inner?;
+        if std::ptr::eq(inner, shape) {
+            return None;
+        }
+        shape = inner;
+    }
+    matches!(shape.def, Def::Scalar).then_some(shape)
+}
+
 fn enum_variants(enum_type: EnumType) -> Vec<String> {
     enum_type.variants.iter().map(variant_cli_name).collect()
 }
@@ -420,6 +446,10 @@ fn value_schema_from_shape(
         return value_schema_from_shape(proxy.shape, ctx);
     }
 
+    if let Some(inner) = transparent_scalar_shape(shape) {
+        return value_schema_from_shape(inner, ctx);
+    }
+
     match shape.def {
         Def::Option(opt) => Ok(ValueSchema::Option {
             value: Box::new(value_schema_from_shape(opt.t, ctx)?),
@@ -451,6 +481,10 @@ fn config_value_schema_from_shape(
     shape: &'static Shape,
     ctx: &SchemaErrorContext,
 ) -> Result<ConfigValueSchema, SchemaError> {
+    if let Some(inner) = transparent_scalar_shape(shape) {
+        return config_value_schema_from_shape(inner, ctx);
+    }
+
     match shape.def {
         Def::Option(opt) => Ok(ConfigValueSchema::Option {
             value: Box::new(config_value_schema_from_shape(opt.t, ctx)?),
@@ -1271,6 +1305,11 @@ fn arg_level_from_fields_with_prefix(
         #[allow(clippy::nonminimal_bool)]
         let required = {
             let shape = field.shape();
+            let shape = if field.proxy.is_none() {
+                transparent_scalar_shape(shape).unwrap_or(shape)
+            } else {
+                shape
+            };
             !matches!(shape.def, Def::Option(_))
                 && !field.has_default()
                 && !shape.is_shape(bool::SHAPE)
