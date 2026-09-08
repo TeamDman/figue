@@ -295,29 +295,59 @@ fn from_trait_vec_default(
 }
 
 fn docs_from_lines(lines: &'static [&'static str]) -> Docs {
-    let mut paragraphs = Vec::new();
-    let mut paragraph = Vec::new();
-
-    for line in lines {
-        let line = line.trim();
-        if line.is_empty() {
-            if !paragraph.is_empty() {
-                paragraphs.push(std::mem::take(&mut paragraph).join(" "));
-            }
-        } else {
-            paragraph.push(line);
-        }
-    }
-    if !paragraph.is_empty() {
-        paragraphs.push(paragraph.join(" "));
-    }
-
-    let mut paragraphs = paragraphs.into_iter();
-    let summary = paragraphs.next();
-    let details = {
-        let paragraphs = paragraphs.collect::<Vec<_>>();
-        (!paragraphs.is_empty()).then(|| paragraphs.join("\n\n"))
+    // A doc attribute may contain several physical lines (for example, a block
+    // comment or #[doc = include_str!(...)]). Empty attributes are blank lines.
+    let lines = lines
+        .iter()
+        .flat_map(|line| line.split('\n'))
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
+        .collect::<Vec<_>>();
+    let Some(start) = lines.iter().position(|line| !line.trim().is_empty()) else {
+        return Docs::default();
     };
+    let end = lines
+        .iter()
+        .rposition(|line| !line.trim().is_empty())
+        .unwrap();
+    let lines = &lines[start..=end];
+
+    // Remove only the common doc-comment indentation. Details may contain
+    // Markdown lists, code indentation, and trailing spaces for hard breaks.
+    let indent = lines
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.len() - line.trim_start_matches([' ', '\t']).len())
+        .min()
+        .unwrap_or(0);
+    // The summary is blank-line-delimited prose, not a parsed Markdown block.
+    // Only its soft source line breaks are joined; details remain structured.
+    let summary_end = lines
+        .iter()
+        .position(|line| line.trim().is_empty())
+        .unwrap_or(lines.len());
+    let summary = Some(
+        lines[..summary_end]
+            .iter()
+            .map(|line| line.trim())
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+    let details = lines[summary_end..]
+        .iter()
+        .position(|line| !line.trim().is_empty())
+        .map(|offset| {
+            lines[summary_end + offset..]
+                .iter()
+                .map(|line| {
+                    if line.trim().is_empty() {
+                        ""
+                    } else {
+                        &line[indent..]
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        });
 
     Docs { summary, details }
 }
@@ -1415,9 +1445,60 @@ mod tests {
         assert_eq!(
             docs.details(),
             Some(
-                "Use `auto` to prefer workload identity and Azure CLI only otherwise.\n\n\
+                "Use `auto` to prefer workload identity and\nAzure CLI only otherwise.\n\n\
                  This final paragraph is intentionally separate."
             )
         );
+    }
+
+    #[test]
+    fn docs_from_lines_preserves_detail_markdown() {
+        let docs = docs_from_lines(&[
+            " A wrapped summary",
+            " continues here.",
+            "",
+            " - first item",
+            "   continuation",
+            " - second item",
+            "",
+            " ```rust",
+            " fn main() {",
+            "     println!(\"hello\");",
+            " }",
+            " ```",
+            "",
+            "     indented_code();",
+            "",
+            " hard break  ",
+            " next line",
+        ]);
+
+        assert_eq!(docs.summary(), Some("A wrapped summary continues here."));
+        assert_eq!(
+            docs.details(),
+            Some(concat!(
+                "- first item\n  continuation\n- second item\n\n",
+                "```rust\nfn main() {\n    println!(\"hello\");\n}\n```\n\n",
+                "    indented_code();\n\nhard break  \nnext line",
+            ))
+        );
+    }
+
+    #[test]
+    fn docs_from_lines_handles_embedded_newlines_and_empty_docs() {
+        let docs =
+            docs_from_lines(&["\r\n Summary\r\n continues.\r\n\r\n Detail\r\n next line.\r\n"]);
+        assert_eq!(docs.summary(), Some("Summary continues."));
+        assert_eq!(docs.details(), Some("Detail\nnext line."));
+
+        for lines in [&[][..], &["", " \t", "\r\n"][..]] {
+            let docs = docs_from_lines(lines);
+            assert_eq!(docs.summary(), None);
+            assert_eq!(docs.details(), None);
+        }
+
+        let docs = docs_from_lines(&["", "Summary only.", "", "  "]);
+        assert_eq!(docs.summary(), Some("Summary only."));
+        assert_eq!(docs.details(), None);
     }
 }

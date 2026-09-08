@@ -121,3 +121,33 @@ fn test_builder_writes_json_schemas_to_directory() {
     assert!(cfg.contains(r#""$schema": "https://json-schema.org/draft/2020-12/schema""#));
     assert!(cfg.contains(r#""description": "Server hostname.""#));
 }
+
+#[test]
+fn test_json_schema_descriptions_preserve_doc_paragraphs_and_markdown() {
+    #[derive(Facet)]
+    struct Args {
+        #[facet(args::config)]
+        settings: Settings,
+    }
+
+    #[derive(Facet)]
+    struct Settings {
+        /// Select the authentication source used when
+        /// logging in.
+        ///
+        /// - `auto` prefers workload identity.
+        /// - `cli` explicitly selects Azure CLI.
+        ///
+        /// ```text
+        /// auth_source = auto
+        /// ```
+        auth_source: String,
+    }
+
+    let schemas = figue::generate_json_schemas::<Args>().unwrap();
+    assert!(schemas[0].contents.contains(concat!(
+        r#""description": "Select the authentication source used when logging in.\n\n"#,
+        r#"- `auto` prefers workload identity.\n- `cli` explicitly selects Azure CLI.\n\n"#,
+        r#"```text\nauth_source = auto\n```""#,
+    )));
+}

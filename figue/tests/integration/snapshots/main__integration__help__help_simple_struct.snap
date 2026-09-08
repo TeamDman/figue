@@ -5,6 +5,7 @@ expression: "strip_ansi_escapes :: strip_str(& help)"
 myapp 1.0.0
 
 A sample CLI application for testing help generation.
+
 This is a longer description that spans multiple lines
 to test how doc comments are handled.
 

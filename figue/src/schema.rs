@@ -191,9 +191,9 @@ pub struct ConfigFieldGroupSchema {
 #[derive(Facet, Debug, Default, Clone)]
 #[facet(skip_all_unless_truthy)]
 pub struct Docs {
-    /// Short summary / first documentation paragraph.
+    /// First blank-line-delimited prose paragraph, with source lines joined.
     summary: Option<String>,
-    /// Later documentation paragraphs.
+    /// Later documentation, preserving line breaks and relative indentation.
     details: Option<String>,
 }
 
@@ -642,12 +642,14 @@ impl ArgLevelSchema {
 }
 
 impl Docs {
-    /// Get the summary (first paragraph of the doc comment).
+    /// Get the first blank-line-delimited prose paragraph, with source line
+    /// breaks joined into spaces. Markdown block syntax is not parsed here.
     pub fn summary(&self) -> Option<&str> {
         self.summary.as_deref()
     }
 
-    /// Get the later doc-comment paragraphs after the summary.
+    /// Get the documentation after the summary, preserving line breaks and
+    /// relative indentation for Markdown formatting.
     pub fn details(&self) -> Option<&str> {
         self.details.as_deref()
     }

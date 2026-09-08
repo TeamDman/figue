@@ -677,14 +677,13 @@ fn generate_help_from_schema(
     // Type doc comment from schema
     if let Some(summary) = schema.docs().summary() {
         out.push('\n');
-        out.push_str(summary.trim());
+        out.push_str(&wrap_text(summary.trim(), "", config.width));
         out.push('\n');
     }
     if let Some(details) = schema.docs().details() {
-        for line in details.lines() {
-            out.push_str(line.trim());
-            out.push('\n');
-        }
+        out.push('\n');
+        out.push_str(details);
+        out.push('\n');
     }
 
     // Additional description
@@ -724,14 +723,13 @@ fn generate_help_for_subcommand_level(
     if let Some(sub) = subcommand {
         if let Some(summary) = sub.docs().summary() {
             out.push('\n');
-            out.push_str(summary.trim());
+            out.push_str(&wrap_text(summary.trim(), "", config.width));
             out.push('\n');
         }
         if let Some(details) = sub.docs().details() {
-            for line in details.lines() {
-                out.push_str(line.trim());
-                out.push('\n');
-            }
+            out.push('\n');
+            out.push_str(details);
+            out.push('\n');
         }
     }
 
@@ -982,7 +980,7 @@ fn render_html_intro(out: &mut String, docs: &crate::schema::Docs, description: 
     }
 
     if let Some(details) = docs.details() {
-        markdown.push_str(details.trim());
+        markdown.push_str(details);
         markdown.push_str("\n\n");
     }
 
@@ -2319,9 +2317,9 @@ fn render_html_docs(out: &mut String, docs: &Docs) {
     }
     if let Some(details) = docs.details() {
         if !text.is_empty() {
-            text.push('\n');
+            text.push_str("\n\n");
         }
-        text.push_str(details.trim());
+        text.push_str(details);
     }
 
     for paragraph in text.split("\n\n") {
@@ -2933,18 +2931,93 @@ mod tests {
             Some("Use `auto` to prefer workload identity.")
         );
 
-        let help = generate_help_for_subcommand(
-            &schema,
-            &[],
-            &HelpConfig {
-                width: 0,
-                ..HelpConfig::default()
-            },
-        );
-        let help = strip_ansi_escapes::strip_str(&help);
+        for width in [0, 46] {
+            let help = generate_help_for_subcommand(
+                &schema,
+                &[],
+                &HelpConfig {
+                    program_name: Some("tool".to_string()),
+                    width,
+                    ..HelpConfig::default()
+                },
+            );
+            let help = strip_ansi_escapes::strip_str(&help);
+            let unwrapped = help.split_whitespace().collect::<Vec<_>>().join(" ");
 
-        assert!(help.contains("Select the authentication source used when logging in."));
-        assert!(!help.contains("Use `auto` to prefer workload identity."));
+            assert!(unwrapped.contains("Select the authentication source used when logging in."));
+            assert!(!help.contains("Use `auto` to prefer workload identity."));
+            if width != 0 {
+                assert!(help.lines().all(|line| line.len() <= width), "{help}");
+                assert!(help.contains("            used when logging in."), "{help}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_terminal_help_wraps_root_and_subcommand_summary_paragraphs() {
+        /// Manage Azure authentication and
+        /// select the source used when logging in.
+        ///
+        /// Keep compatibility logins
+        /// explicitly selected for this specific command.
+        #[derive(Facet)]
+        struct Args {
+            #[facet(args::subcommand)]
+            command: Option<Command>,
+        }
+
+        #[derive(Facet)]
+        #[repr(u8)]
+        #[allow(dead_code)]
+        enum Command {
+            /// Log in to an Azure tenant using a
+            /// tracked id or a configured alias.
+            ///
+            /// Use a tracked tenant id
+            /// or alias.
+            ///
+            ///     tool login example
+            Login {},
+        }
+
+        let schema = Schema::from_shape(Args::SHAPE).unwrap();
+        for width in [0, 36] {
+            let config = HelpConfig {
+                width,
+                ..HelpConfig::default()
+            };
+            let root = generate_help_for_subcommand(&schema, &[], &config);
+            let leaf = generate_help_for_subcommand(&schema, &["Login".to_string()], &config);
+
+            for (help, expected_summary, expected_details) in [
+                (
+                    root,
+                    "Manage Azure authentication and select the source used when logging in.",
+                    "Keep compatibility logins\nexplicitly selected for this specific command.\n",
+                ),
+                (
+                    leaf,
+                    "Log in to an Azure tenant using a tracked id or a configured alias.",
+                    "Use a tracked tenant id\nor alias.\n\n    tool login example\n",
+                ),
+            ] {
+                let (_, intro) = help.split_once("\n\n").unwrap();
+                let (summary, remainder) = intro.split_once("\n\n").unwrap();
+                assert_eq!(
+                    summary.split_whitespace().collect::<Vec<_>>().join(" "),
+                    expected_summary
+                );
+                if width == 0 {
+                    assert_eq!(summary, expected_summary);
+                } else {
+                    assert!(summary.contains('\n'), "{summary}");
+                    assert!(summary.lines().all(|line| line.len() <= width), "{summary}");
+                }
+                // Details retain their paragraph boundaries, source line
+                // breaks, and indentation even when a line exceeds the width.
+                assert!(remainder.starts_with(expected_details), "{remainder}");
+            }
+        }
     }
 
     /// Arguments for the serve subcommand
@@ -3268,6 +3341,73 @@ mod tests {
         let html = generate_html_help::<Args>(&HelpConfig::default());
 
         assert!(html.contains("<p>Output path for the alignment JSONL (one object per line).</p>"));
+    }
+
+    #[test]
+    fn test_html_help_preserves_argument_and_config_doc_paragraphs() {
+        #[derive(Facet)]
+        struct Args {
+            /// Select the authentication source used when
+            /// logging in.
+            ///
+            /// Use `auto` to prefer workload identity.
+            #[facet(args::named)]
+            auth_source: String,
+            #[facet(args::config)]
+            settings: Settings,
+        }
+
+        #[derive(Facet)]
+        struct Settings {
+            /// Write structured logs to this file or
+            /// directory.
+            ///
+            /// A directory receives a generated filename.
+            log_file: String,
+        }
+
+        let html = generate_html_help::<Args>(&HelpConfig::default());
+
+        assert!(html.contains(concat!(
+            "<p>Select the authentication source used when logging in.</p>\n",
+            "<p>Use <code>auto</code> to prefer workload identity.</p>",
+        )));
+        assert!(html.contains(concat!(
+            "<p>Write structured logs to this file or directory.</p>\n",
+            "<p>A directory receives a generated filename.</p>",
+        )));
+    }
+
+    #[test]
+    fn test_html_help_intro_preserves_markdown_detail_structure() {
+        #[derive(Facet)]
+        #[doc = "Explore registered\nobjects.\n\n    tool registry list\n\n- Borrowed objects\n  remain visible.\n- Owned objects\n\n```rust\nfn inspect() {\n    show_registry();\n}\n```\n\nA hard break  \ncontinues here."]
+        struct Args {
+            #[facet(args::named)]
+            verbose: bool,
+        }
+
+        let html = generate_html_help::<Args>(&HelpConfig::default());
+        let markdown = html
+            .split("data-markdown-source=\"intro\">")
+            .nth(1)
+            .unwrap()
+            .split("</script>")
+            .next()
+            .unwrap();
+
+        // This source is passed intact to the full Markdown renderer in the
+        // HTML page. In particular, the first detail line must stay indented.
+        assert_eq!(
+            markdown,
+            concat!(
+                "Explore registered objects.\n\n",
+                "    tool registry list\n\n",
+                "- Borrowed objects\n  remain visible.\n- Owned objects\n\n",
+                "```rust\nfn inspect() {\n    show_registry();\n}\n```\n\n",
+                "A hard break  \ncontinues here.\n\n",
+            )
+        );
     }
 
     #[test]
