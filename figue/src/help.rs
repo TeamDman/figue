@@ -404,6 +404,7 @@ pub(crate) fn generate_help_for_subcommand_with_config_formats(
 
     // Navigate to the subcommand
     let mut current_args = schema.args();
+    let mut parent_args = Vec::new();
     let mut command_path = vec![program_name.clone()];
 
     for name in subcommand_path {
@@ -416,6 +417,7 @@ pub(crate) fn generate_help_for_subcommand_with_config_formats(
 
         if let Some(sub) = sub {
             command_path.push(sub.cli_name().to_string());
+            parent_args.push(current_args);
             current_args = sub.args();
         } else {
             // Subcommand not found, fall back to root help
@@ -443,7 +445,13 @@ pub(crate) fn generate_help_for_subcommand_with_config_formats(
         }
     }
 
-    generate_help_for_subcommand_level(current_args, final_sub, &command_path.join(" "), config)
+    generate_help_for_subcommand_level(
+        current_args,
+        &parent_args,
+        final_sub,
+        &command_path.join(" "),
+        config,
+    )
 }
 
 pub(crate) fn generate_help_for_subcommand_with_config_formats_and_shape(
@@ -699,6 +707,7 @@ fn generate_help_from_schema(
     generate_arg_level_help(
         &mut out,
         schema.args(),
+        &[],
         schema.configs(),
         program_name,
         config,
@@ -711,6 +720,7 @@ fn generate_help_from_schema(
 /// Generate help for a subcommand level.
 fn generate_help_for_subcommand_level(
     args: &ArgLevelSchema,
+    parent_args: &[&ArgLevelSchema],
     subcommand: Option<&Subcommand>,
     full_command: &str,
     config: &HelpConfig,
@@ -747,6 +757,7 @@ fn generate_help_for_subcommand_level(
     generate_arg_level_help(
         &mut out,
         args,
+        parent_args,
         &[],
         full_command,
         config,
@@ -1276,8 +1287,8 @@ fn render_html_arg_row(out: &mut String, arg: &ArgSchema) {
 fn render_arg_name_meta(out: &mut String, arg: &ArgSchema) {
     let value_mode = arg.named_value_mode();
     let is_bool_flag = matches!(value_mode, Some(NamedValueMode::BoolFlag));
-    let hide_false_bool_default = is_bool_flag
-        && arg.default().map(config_value_summary).as_deref() == Some("false");
+    let hide_false_bool_default =
+        is_bool_flag && arg.default().map(config_value_summary).as_deref() == Some("false");
     let has_enum_values = arg.cli_value_schema().enum_variants().is_some();
 
     if hide_false_bool_default && !has_enum_values {
@@ -2469,20 +2480,20 @@ fn wrap_text(text: &str, indent: &str, max_width: usize) -> String {
 fn generate_arg_level_help(
     out: &mut String,
     args: &ArgLevelSchema,
+    parent_args: &[&ArgLevelSchema],
     config_roots: &[ConfigStructSchema],
     program_name: &str,
     config: &HelpConfig,
     config_file_extensions: &[&str],
 ) {
-    // Separate positionals and named flags
+    // Positionals and commands belong to this level. Named options can also be
+    // consumed by any ancestor, including flattened options and built-ins.
     let mut positionals: Vec<&ArgSchema> = Vec::new();
-    let mut flags: Vec<&ArgSchema> = Vec::new();
+    let flags = visible_named_args(args, parent_args);
 
     for (_name, arg) in args.args().iter() {
         if arg.kind().is_positional() {
             positionals.push(arg);
-        } else {
-            flags.push(arg);
         }
     }
 
@@ -2526,7 +2537,7 @@ fn generate_arg_level_help(
     if !flags.is_empty() || !config_roots.is_empty() {
         out.push_str(&format!("{}:\n", "OPTIONS".yellow().bold()));
         for arg in &flags {
-            write_arg_help(out, arg, config);
+            write_arg_help_with_names(out, arg.arg, config, Some(arg));
         }
         for config_root in config_roots {
             write_config_help(out, config_root, config, config_file_extensions);
@@ -2732,18 +2743,128 @@ fn config_override_flag(config_flag: &str, path: &[String]) -> String {
     format!("{config_flag}.{}", path.join("."))
 }
 
+/// A help row contains only the spellings that still address this argument at
+/// the selected command. Shadowing one alias must not hide the entire option.
+struct HelpArg<'a> {
+    arg: &'a ArgSchema,
+    short: Option<char>,
+    longs: Vec<HelpLongName>,
+}
+
+struct HelpLongName {
+    name: String,
+    positive: bool,
+    negative: bool,
+}
+
+impl HelpLongName {
+    fn display(&self, primary: bool) -> String {
+        match (self.positive, self.negative) {
+            (true, true) if primary => format!("[no-]{}", self.name),
+            (false, true) => format!("no-{}", self.name),
+            _ => self.name.clone(),
+        }
+    }
+}
+
+fn visible_named_args<'a>(
+    args: &'a ArgLevelSchema,
+    parent_args: &[&'a ArgLevelSchema],
+) -> Vec<HelpArg<'a>> {
+    let levels: Vec<_> = parent_args.iter().copied().chain([args]).collect();
+    let find_long = |name: &str| {
+        levels
+            .iter()
+            .rev()
+            .find_map(|level| level.args().get(name).map(|(_, arg)| arg))
+    };
+    let is_bool =
+        |arg: &&ArgSchema| matches!(arg.named_value_mode(), Some(NamedValueMode::BoolFlag));
+    let is_same = |candidate: Option<&ArgSchema>, arg: &ArgSchema| {
+        candidate.is_some_and(|candidate| core::ptr::eq(candidate, arg))
+    };
+
+    let mut candidates = Vec::new();
+    for level in &levels {
+        candidates.extend(level.args().iter().map(|(_, arg)| arg));
+    }
+    candidates
+        .into_iter()
+        .filter(|arg| !arg.kind().is_positional())
+        .filter_map(|arg| {
+            let short = arg.kind().short().filter(|short| {
+                let owner = levels.iter().rev().find_map(|level| {
+                    level
+                        .args()
+                        .iter()
+                        .map(|(_, arg)| arg)
+                        .find(|arg| arg.kind().short() == Some(*short))
+                });
+                is_same(owner, arg)
+            });
+            let longs: Vec<_> = arg
+                .long_flag_names()
+                .filter_map(|name| {
+                    let positive = is_same(find_long(&name), arg);
+                    // Match the parser: exact names at every depth win over
+                    // generated --no-* flags. For negation, a non-bool local
+                    // option still allows the nearest matching parent bool.
+                    let negative = is_bool(&arg)
+                        && find_long(&format!("no-{name}")).is_none()
+                        && is_same(
+                            args.args()
+                                .get(&name)
+                                .map(|(_, arg)| arg)
+                                .filter(is_bool)
+                                .or_else(|| {
+                                    parent_args
+                                        .iter()
+                                        .rev()
+                                        .find_map(|level| {
+                                            level.args().get(&name).map(|(_, arg)| arg)
+                                        })
+                                        .filter(is_bool)
+                                }),
+                            arg,
+                        );
+                    (positive || negative).then_some(HelpLongName {
+                        name,
+                        positive,
+                        negative,
+                    })
+                })
+                .collect();
+            (short.is_some() || !longs.is_empty()).then_some(HelpArg { arg, short, longs })
+        })
+        .collect()
+}
+
 /// Write help for a single argument.
 fn write_arg_help(out: &mut String, arg: &ArgSchema, config: &HelpConfig) {
+    write_arg_help_with_names(out, arg, config, None);
+}
+
+fn write_arg_help_with_names(
+    out: &mut String,
+    arg: &ArgSchema,
+    config: &HelpConfig,
+    names: Option<&HelpArg<'_>>,
+) {
     out.push_str("    ");
 
     let is_positional = arg.kind().is_positional();
+    let short = names.map_or_else(|| arg.kind().short(), |names| names.short);
+    let has_long = names.is_none_or(|names| !names.longs.is_empty());
 
     // Short flag (or spacing for alignment)
-    if let Some(c) = arg.kind().short() {
+    if let Some(c) = short {
         out.push_str(&format!(
-            "{}, ",
+            "{}",
             format!("-{c}").if_supports_color(Stdout, |text| text.green())
         ));
+        if has_long {
+            out.push_str(", ");
+        }
     } else {
         // Add spacing to align with flags that have short options
         out.push_str("    ");
@@ -2760,15 +2881,22 @@ fn write_arg_help(out: &mut String, arg: &ArgSchema, config: &HelpConfig) {
         ));
     } else {
         let value_mode = arg.named_value_mode();
-        let flag_str = if matches!(value_mode, Some(NamedValueMode::BoolFlag)) {
-            format!("--[no-]{}", name.to_kebab_case())
+        let flag_str = if let Some(names) = names {
+            names
+                .longs
+                .first()
+                .map(|name| format!("--{}", name.display(true)))
+        } else if matches!(value_mode, Some(NamedValueMode::BoolFlag)) {
+            Some(format!("--[no-]{}", name.to_kebab_case()))
         } else {
-            format!("--{}", name.to_kebab_case())
+            Some(format!("--{}", name.to_kebab_case()))
         };
-        out.push_str(&format!(
-            "{}",
-            flag_str.if_supports_color(Stdout, |text| text.green())
-        ));
+        if let Some(flag_str) = flag_str {
+            out.push_str(&format!(
+                "{}",
+                flag_str.if_supports_color(Stdout, |text| text.green())
+            ));
+        }
 
         if matches!(
             value_mode,
@@ -2807,10 +2935,21 @@ fn write_arg_help(out: &mut String, arg: &ArgSchema, config: &HelpConfig) {
         out.push_str(&wrap_text("[can be repeated]", DOC_INDENT, config.width));
     }
 
-    if !arg.aliases().is_empty() {
+    let aliases = names.map_or_else(
+        || arg.aliases().to_vec(),
+        |names| {
+            names
+                .longs
+                .iter()
+                .skip(1)
+                .map(|name| name.display(false))
+                .collect()
+        },
+    );
+    if !aliases.is_empty() {
         out.push('\n');
         out.push_str(DOC_INDENT);
-        out.push_str(&format!("aliases: {}", arg.aliases().join(", ")));
+        out.push_str(&format!("aliases: {}", aliases.join(", ")));
     }
 
     out.push('\n');
@@ -3398,6 +3537,25 @@ mod tests {
     }
 
     #[test]
+    fn test_invalid_subcommand_path_falls_back_to_unchanged_root_help() {
+        let schema = Schema::from_shape(NestedRootArgs::SHAPE).unwrap();
+        let config = HelpConfig {
+            program_name: Some("myapp".to_string()),
+            ..HelpConfig::default()
+        };
+        let root_help = generate_help_for_subcommand(&schema, &[], &config);
+        for path in [
+            vec!["missing".to_string()],
+            vec!["Home".to_string(), "missing".to_string()],
+        ] {
+            assert_eq!(
+                generate_help_for_subcommand(&schema, &path, &config),
+                root_help
+            );
+        }
+    }
+
+    #[test]
     fn test_help_list_short_is_recursive_with_full_command_paths() {
         let schema = Schema::from_shape(NestedRootArgs::SHAPE).unwrap();
         let output = generate_help_list_for_subcommand_with_config_formats(
@@ -3552,16 +3710,27 @@ mod tests {
     fn test_help_shows_aliases_after_canonical_name() {
         let schema = Schema::from_shape(ArgsWithAlias::SHAPE).unwrap();
         let help = generate_help_for_subcommand(&schema, &[], &HelpConfig::default());
-        assert!(help.contains("--[no-]color"), "help should show canonical flag: {help}");
-        assert!(help.contains("aliases: colour"), "help should show aliases: {help}");
+        assert!(
+            help.contains("--[no-]color"),
+            "help should show canonical flag: {help}"
+        );
+        assert!(
+            help.contains("aliases: colour"),
+            "help should show aliases: {help}"
+        );
     }
 
     #[test]
     fn test_help_shows_subcommand_aliases_with_canonical_name() {
         let schema = Schema::from_shape(ArgsWithAliasedSubcommand::SHAPE).unwrap();
         let help = generate_help_for_subcommand(&schema, &[], &HelpConfig::default());
-        assert!(help.contains("profile"), "help should show canonical subcommand: {help}");
-        assert!(help.contains("aliases: profiles"), "help should surface compatibility aliases: {help}");
+        assert!(
+            help.contains("profile"),
+            "help should show canonical subcommand: {help}"
+        );
+        assert!(
+            help.contains("aliases: profiles"),
+            "help should surface compatibility aliases: {help}"
+        );
     }
 }
-
