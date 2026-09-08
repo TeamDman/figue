@@ -5,6 +5,7 @@ use std::ffi::OsString;
 
 use arbitrary::Arbitrary;
 use facet_core::Facet;
+use facet_pretty::PrettyPrinter;
 use heck::ToKebabCase;
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -161,11 +162,14 @@ impl EntropyPool {
 ///
 /// This validates that repeated calls for the same value produce identical
 /// argument vectors.
+///
+/// Failure diagnostics use Facet reflection, so `T` does not need to implement
+/// [`Debug`](core::fmt::Debug).
 pub fn assert_to_args_consistency<T>(
     config: TestToArgsConsistencyConfig,
 ) -> Result<(), ArbitraryCheckError>
 where
-    T: Facet<'static> + for<'a> Arbitrary<'a> + core::fmt::Debug,
+    T: Facet<'static> + for<'a> Arbitrary<'a>,
 {
     let mut entropy_pool = EntropyPool::new(
         config.random_data_len,
@@ -201,7 +205,8 @@ where
                 successful_samples,
                 attempts,
                 message: format!(
-                    "to_args() is non-deterministic for generated value: {instance:?}\nfirst={args1:?}\nsecond={args2:?}\n{}",
+                    "to_args() is non-deterministic for generated value: {}\nfirst={args1:?}\nsecond={args2:?}\n{}",
+                    format_generated_value(&instance),
                     entropy_pool.context_suffix()
                 ),
             });
@@ -230,9 +235,12 @@ where
 /// 1. value -> `to_args()`
 /// 2. args -> parse with `Driver` (strict CLI mode)
 /// 3. parsed value equals original value
+///
+/// Values are compared using [`PartialEq`]. Failure diagnostics use Facet
+/// reflection, so `T` does not need to implement [`Debug`](core::fmt::Debug).
 pub fn assert_to_args_roundtrip<T>(config: TestToArgsRoundTrip) -> Result<(), ArbitraryCheckError>
 where
-    T: Facet<'static> + for<'a> Arbitrary<'a> + PartialEq + core::fmt::Debug,
+    T: Facet<'static> + for<'a> Arbitrary<'a> + PartialEq,
 {
     let schema = Schema::from_shape(T::SHAPE).map_err(|error| ArbitraryCheckError {
         successful_samples: 0,
@@ -289,8 +297,9 @@ where
             successful_samples: total_successful_samples,
             attempts: total_attempts,
             message: format!(
-                "failed to parse generated args for path {:?}\nargs={args:?}\nvalue={instance:?}\nerror={message}\n{}",
+                "failed to parse generated args for path {:?}\nargs={args:?}\nvalue={}\nerror={message}\n{}",
                 command_paths[leaf_id],
+                format_generated_value(&instance),
                 entropy_pool.context_suffix()
             ),
         }
@@ -301,8 +310,10 @@ where
                 successful_samples: total_successful_samples,
                 attempts: total_attempts,
                 message: format!(
-                    "roundtrip mismatch for path {:?}\noriginal={instance:?}\nparsed={parsed:?}\nargs={args:?}\n{}",
+                    "roundtrip mismatch for path {:?}\noriginal={}\nparsed={}\nargs={args:?}\n{}",
                     command_paths[leaf_id],
+                    format_generated_value(&instance),
+                    format_generated_value(&parsed),
                     entropy_pool.context_suffix()
                 ),
             });
@@ -346,7 +357,7 @@ fn assert_to_args_roundtrip_global<T>(
     config: TestToArgsRoundTrip,
 ) -> Result<(), ArbitraryCheckError>
 where
-    T: Facet<'static> + for<'a> Arbitrary<'a> + PartialEq + core::fmt::Debug,
+    T: Facet<'static> + for<'a> Arbitrary<'a> + PartialEq,
 {
     let schema = Schema::from_shape(T::SHAPE).map_err(|error| ArbitraryCheckError {
         successful_samples: 0,
@@ -380,13 +391,14 @@ where
 
         let parsed = parse_from_os_args_with_schema::<T>(&schema, &args).map_err(|message| {
             ArbitraryCheckError {
-            successful_samples,
-            attempts,
-            message: format!(
-                "failed to parse generated args\nargs={args:?}\nvalue={instance:?}\nerror={message}\n{}",
-                entropy_pool.context_suffix()
-            ),
-        }
+                successful_samples,
+                attempts,
+                message: format!(
+                    "failed to parse generated args\nargs={args:?}\nvalue={}\nerror={message}\n{}",
+                    format_generated_value(&instance),
+                    entropy_pool.context_suffix()
+                ),
+            }
         })?;
 
         if instance != parsed {
@@ -394,7 +406,9 @@ where
                 successful_samples,
                 attempts,
                 message: format!(
-                    "roundtrip mismatch\noriginal={instance:?}\nparsed={parsed:?}\nargs={args:?}\n{}",
+                    "roundtrip mismatch\noriginal={}\nparsed={}\nargs={args:?}\n{}",
+                    format_generated_value(&instance),
+                    format_generated_value(&parsed),
                     entropy_pool.context_suffix()
                 ),
             });
@@ -415,6 +429,12 @@ where
     }
 
     Ok(())
+}
+
+// Only called on failure paths. Explicitly disable colors so error messages
+// remain plain text even when the surrounding test runner enables ANSI output.
+fn format_generated_value<T: Facet<'static>>(value: &T) -> String {
+    PrettyPrinter::new().with_colors(false.into()).format(value)
 }
 
 #[derive(Clone, Debug)]
@@ -460,7 +480,10 @@ fn command_node_from_arg_level(level: &ArgLevelSchema) -> CommandNode {
             }
             ArgKind::Named { counted, .. } => {
                 let consumes_value = !counted
-                    && matches!(named_arg_value_mode(schema), NamedArgValueMode::RequiredValue);
+                    && matches!(
+                        named_arg_value_mode(schema),
+                        NamedArgValueMode::RequiredValue
+                    );
                 node.named_flag_consumes_value
                     .insert(name.to_kebab_case(), consumes_value);
             }
@@ -1033,5 +1056,3 @@ mod tests {
         );
     }
 }
-
-
