@@ -2910,6 +2910,43 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_terminal_help_arg_rows_render_complete_summary_paragraph() {
+        #[derive(Facet)]
+        struct Args {
+            /// Select the authentication source used when
+            /// logging in.
+            ///
+            /// Use `auto` to prefer workload identity.
+            #[facet(args::named)]
+            auth_source: String,
+        }
+
+        let schema = Schema::from_shape(Args::SHAPE).unwrap();
+        let arg = schema.args().args().get("auth-source").unwrap().1;
+        assert_eq!(
+            arg.docs().summary(),
+            Some("Select the authentication source used when logging in.")
+        );
+        assert_eq!(
+            arg.docs().details(),
+            Some("Use `auto` to prefer workload identity.")
+        );
+
+        let help = generate_help_for_subcommand(
+            &schema,
+            &[],
+            &HelpConfig {
+                width: 0,
+                ..HelpConfig::default()
+            },
+        );
+        let help = strip_ansi_escapes::strip_str(&help);
+
+        assert!(help.contains("Select the authentication source used when logging in."));
+        assert!(!help.contains("Use `auto` to prefer workload identity."));
+    }
+
     /// Arguments for the serve subcommand
     #[derive(Facet)]
     struct ServeArgs {
@@ -3564,4 +3601,3 @@ mod tests {
         assert!(help.contains("aliases: profiles"), "help should surface compatibility aliases: {help}");
     }
 }
-

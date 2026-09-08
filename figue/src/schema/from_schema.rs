@@ -295,26 +295,28 @@ fn from_trait_vec_default(
 }
 
 fn docs_from_lines(lines: &'static [&'static str]) -> Docs {
-    if lines.is_empty() {
-        return Docs::default();
+    let mut paragraphs = Vec::new();
+    let mut paragraph = Vec::new();
+
+    for line in lines {
+        let line = line.trim();
+        if line.is_empty() {
+            if !paragraph.is_empty() {
+                paragraphs.push(std::mem::take(&mut paragraph).join(" "));
+            }
+        } else {
+            paragraph.push(line);
+        }
+    }
+    if !paragraph.is_empty() {
+        paragraphs.push(paragraph.join(" "));
     }
 
-    let summary = lines
-        .first()
-        .map(|line| line.trim().to_string())
-        .filter(|s| !s.is_empty());
-
-    let details = if lines.len() > 1 {
-        let mut buf = String::new();
-        for line in &lines[1..] {
-            if !buf.is_empty() {
-                buf.push('\n');
-            }
-            buf.push_str(line.trim());
-        }
-        if buf.is_empty() { None } else { Some(buf) }
-    } else {
-        None
+    let mut paragraphs = paragraphs.into_iter();
+    let summary = paragraphs.next();
+    let details = {
+        let paragraphs = paragraphs.collect::<Vec<_>>();
+        (!paragraphs.is_empty()).then(|| paragraphs.join("\n\n"))
     };
 
     Docs { summary, details }
@@ -1384,4 +1386,38 @@ const fn is_supported_counted_type(shape: &'static facet_core::Shape) -> bool {
 /// Check if a field is marked with `args::config`.
 fn is_config_field(field: &facet_core::Field) -> bool {
     field.has_attr(Some("args"), "config")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::docs_from_lines;
+
+    #[test]
+    fn docs_from_lines_uses_paragraphs_instead_of_physical_source_lines() {
+        static DOCS: &[&str] = &[
+            "",
+            "Select the authentication source used when",
+            "logging in.",
+            "",
+            "Use `auto` to prefer workload identity and",
+            "Azure CLI only otherwise.",
+            "",
+            "This final paragraph is intentionally separate.",
+            "",
+        ];
+
+        let docs = docs_from_lines(DOCS);
+
+        assert_eq!(
+            docs.summary(),
+            Some("Select the authentication source used when logging in.")
+        );
+        assert_eq!(
+            docs.details(),
+            Some(
+                "Use `auto` to prefer workload identity and Azure CLI only otherwise.\n\n\
+                 This final paragraph is intentionally separate."
+            )
+        );
+    }
 }

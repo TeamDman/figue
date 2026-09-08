@@ -191,9 +191,9 @@ pub struct ConfigFieldGroupSchema {
 #[derive(Facet, Debug, Default, Clone)]
 #[facet(skip_all_unless_truthy)]
 pub struct Docs {
-    /// Short summary / first line.
+    /// Short summary / first documentation paragraph.
     summary: Option<String>,
-    /// Long-form doc string / details.
+    /// Later documentation paragraphs.
     details: Option<String>,
 }
 
@@ -642,12 +642,12 @@ impl ArgLevelSchema {
 }
 
 impl Docs {
-    /// Get the summary (first line of doc comment).
+    /// Get the summary (first paragraph of the doc comment).
     pub fn summary(&self) -> Option<&str> {
         self.summary.as_deref()
     }
 
-    /// Get the details (full doc comment after summary).
+    /// Get the later doc-comment paragraphs after the summary.
     pub fn details(&self) -> Option<&str> {
         self.details.as_deref()
     }
@@ -1113,4 +1113,3 @@ impl ValueSchema {
 #[cfg(test)]
 #[allow(dead_code)]
 mod tests;
-
