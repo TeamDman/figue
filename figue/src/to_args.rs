@@ -92,6 +92,10 @@ impl std::error::Error for ToArgsError {}
 ///
 /// This uses figue's schema and Facet serialization metadata, so consumers do not
 /// need to hand-write ad-hoc `ToArgs` implementations for each command/subcommand.
+///
+/// [`std::path::PathBuf`] values are emitted as their exact UTF-8 text, without
+/// normalizing paths. A path containing non-UTF-8 data returns
+/// [`ToArgsError::Serialize`]; native non-Unicode paths are not lossy-converted.
 pub fn to_os_args<T: Facet<'static> + ?Sized>(value: &T) -> Result<Vec<OsString>, ToArgsError> {
     let schema = Schema::from_shape(T::SHAPE)
         .map_err(|error| ToArgsError::SchemaBuild(error.to_string()))?;
@@ -131,6 +135,8 @@ pub fn to_args_string_with_current_exe<T: Facet<'static> + ?Sized>(
 }
 
 /// Convenience trait for converting typed CLI values to argument vectors.
+///
+/// See [`to_os_args`] for the UTF-8 requirement on native path values.
 pub trait ToArgs: Facet<'static> {
     /// Convert this value into a vector of CLI arguments.
     fn to_args(&self) -> Result<Vec<OsString>, ToArgsError> {
@@ -187,8 +193,15 @@ fn serialize_to_config_value<T: Facet<'static> + ?Sized>(
     value: &T,
 ) -> Result<ConfigValue, ToArgsError> {
     let mut serializer = ConfigValueSerializer::new();
-    facet_format::serialize_root(&mut serializer, facet_reflect::Peek::new(value))
-        .map_err(|error| ToArgsError::Serialize(error.to_string()))?;
+    facet_format::serialize_root(&mut serializer, facet_reflect::Peek::new(value)).map_err(
+        |error| {
+            // The generic Display message hides format-specific error details.
+            ToArgsError::Serialize(match error {
+                facet_format::SerializeError::Backend(message) => message,
+                other => other.to_string(),
+            })
+        },
+    )?;
     Ok(serializer.finish())
 }
 
