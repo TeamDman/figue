@@ -1523,6 +1523,22 @@ impl ConfigValueSerializer {
 impl facet_format::FormatSerializer for ConfigValueSerializer {
     type Error = String;
 
+    fn serialize_opaque_scalar(
+        &mut self,
+        _shape: &'static Shape,
+        value: facet_reflect::Peek<'_, '_>,
+    ) -> Result<bool, Self::Error> {
+        let Ok(path) = value.get::<std::path::PathBuf>() else {
+            return Ok(false);
+        };
+        // CLI/config values are text, even though native paths need not be.
+        let text = path
+            .to_str()
+            .ok_or("cannot serialize PathBuf containing non-UTF-8 data")?;
+        self.scalar(ScalarValue::Str(std::borrow::Cow::Borrowed(text)))?;
+        Ok(true)
+    }
+
     fn begin_struct(&mut self) -> Result<(), Self::Error> {
         self.stack.push(BuildFrame::Object {
             map: IndexMap::default(),
@@ -2533,4 +2549,20 @@ fn test_from_config_value_f32_literal_default() {
     let kweh: Kweh = from_config_value(&value).expect("should deserialize default");
 
     assert_eq!(kweh.chocobo, 0.0);
+}
+
+#[test]
+fn config_serializer_does_not_guess_unrelated_opaque_representations() {
+    #[derive(facet::Facet, Debug)]
+    #[facet(opaque)]
+    struct Unrelated;
+
+    let mut serializer = ConfigValueSerializer::new();
+    let error = facet_format::serialize_root(&mut serializer, facet_reflect::Peek::new(&Unrelated))
+        .expect_err("unrelated opaque types should remain unsupported");
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported value kind for serialization")
+    );
 }
