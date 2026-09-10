@@ -2534,3 +2534,15 @@ fn test_from_config_value_f32_literal_default() {
 
     assert_eq!(kweh.chocobo, 0.0);
 }
+
+#[test]
+fn config_serializer_does_not_guess_unrelated_opaque_representations() {
+    #[derive(facet::Facet, Debug)]
+    #[facet(opaque)]
+    struct Unrelated;
+
+    let mut serializer = ConfigValueSerializer::new();
+    let error = facet_format::serialize_root(&mut serializer, facet_reflect::Peek::new(&Unrelated))
+        .expect_err("unrelated opaque types should remain unsupported");
+    assert!(error.to_string().contains("unsupported value kind for serialization"));
+}
