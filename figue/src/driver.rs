@@ -583,7 +583,10 @@ impl<T: Facet<'static>> Driver<T> {
             let only_missing_subcommand = !has_unknown
                 && subcommand_field_name.is_some()
                 && missing_fields.len() == 1
-                && missing_fields[0].field_name == subcommand_field_name.unwrap();
+                // Nested command structs commonly reuse `command` as their
+                // field name. Compare the complete path so a missing nested
+                // command is handled by the subcommand-aware branch below.
+                && missing_fields[0].field_path == subcommand_field_name.unwrap();
 
             if only_missing_subcommand {
                 // Show help instead of "missing required fields"
