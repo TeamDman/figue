@@ -527,6 +527,42 @@ fn test_nested_subcommand_not_provided_with_builtins() {
 }
 
 #[test]
+fn test_nested_subcommand_reusing_command_field_name_shows_nested_help() {
+    #[derive(Facet, Debug)]
+    struct Cli {
+        #[facet(args::subcommand, default)]
+        command: Option<Command>,
+    }
+
+    #[derive(Facet, Debug)]
+    #[repr(u8)]
+    enum Command {
+        Query(QueryArgs),
+        Serve,
+    }
+
+    #[derive(Facet, Debug)]
+    struct QueryArgs {
+        #[facet(args::subcommand)]
+        command: QueryCommand,
+    }
+
+    #[derive(Facet, Debug)]
+    #[repr(u8)]
+    enum QueryCommand {
+        Status,
+        Config,
+    }
+
+    let err = figue::from_slice::<Cli>(&["query"]).unwrap_err();
+    let figue::DriverError::Help { text, .. } = err else {
+        panic!("expected nested command help");
+    };
+    assert!(text.contains("main query <COMMAND>"), "{text}");
+    assert!(!text.contains("main [COMMAND]"), "{text}");
+}
+
+#[test]
 fn test_unknown_subcommand_suggestion_considers_aliases() {
     #[derive(Facet, Debug)]
     struct Cli {
