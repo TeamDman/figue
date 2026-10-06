@@ -1,0 +1,30 @@
+---
+source: figue/tests/integration/help.rs
+expression: "$crate :: common :: strip_ansi(& help)"
+---
+main install
+
+Install a package
+
+USAGE:
+    main install [OPTIONS] <PACKAGE>
+
+ARGUMENTS:
+        <PACKAGE>
+            Package name to install
+
+OPTIONS:
+    -h, --[no-]help
+            Show help message and exit.
+        --[no-]html-help
+            Open HTML help in the browser and exit.
+    -V, --[no-]version
+            Show version and exit.
+        --completions <bash,zsh,fish>
+            Generate shell completions.
+        --export-jsonschemas <DIR>
+            Export JSON Schema files for all config roots.
+    -g, --[no-]global
+            Install globally
+    -f, --[no-]force
+            Force reinstall even if already installed
