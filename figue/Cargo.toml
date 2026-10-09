@@ -1,22 +1,26 @@
 [package]
-name = "figue"
-version = "5.0.0-rc.6"
+name = "teamy-figue"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-authors = ["Amos Wenger <amos@bearcove.eu>"]
+authors = ["Amos Wenger <amos@bearcove.eu>", "TeamDman <TeamDman9201@gmail.com>"]
 license.workspace = true
 repository.workspace = true
-homepage = "https://facet.rs"
+homepage.workspace = true
 keywords = ["cli", "args", "parser", "facet", "command-line"]
 categories = ["command-line-interface"]
-description = "Type-safe CLI arguments, config files, and environment variables powered by Facet reflection"
-documentation = "https://docs.rs/figue"
+description = "TeamDman fork of Figue: typed CLI arguments, config files, and environment variables using the Teamy Facet fork"
+documentation = "https://docs.rs/teamy-figue"
+readme = "README.md"
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [package.metadata."docs.rs"]
 rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+[lib]
+name = "figue"
 
 [dependencies]
 camino.workspace = true
@@ -42,13 +46,15 @@ rand = { version = "0.9.2", optional = true }
 rand_chacha = { version = "0.9.0", optional = true }
 
 [dev-dependencies]
-facet-format = { workspace = true, features = ["tracing"] }
-facet-default.workspace = true
-facet-json = { workspace = true, features = ["tracing"] }
-facet-reflect = { workspace = true, features = ["tracing"] }
-facet = { workspace = true, features = ["all-impls"] }
-facet-solver.workspace = true
-facet-testhelpers.workspace = true
+# Source-tree checks use sibling forks. Path-only dev dependencies are omitted
+# from registry archives so first publication does not require test-only crates.
+facet-format = { package = "teamy-facet-format", path = "../../facet-format/facet-format", features = ["tracing"] }
+facet-default = { package = "teamy-facet-default", path = "../../facet/facet-default" }
+facet-json = { package = "teamy-facet-json", path = "../../facet-format/facet-json", features = ["tracing"] }
+facet-reflect = { package = "teamy-facet-reflect", path = "../../facet/facet-reflect", features = ["tracing"] }
+facet = { package = "teamy-facet", path = "../../facet/facet", features = ["all-impls"] }
+facet-solver = { package = "teamy-facet-solver", path = "../../facet/facet-solver" }
+facet-testhelpers = { package = "teamy-facet-testhelpers", path = "../../facet/facet-testhelpers" }
 insta.workspace = true
 tempfile.workspace = true
 
@@ -61,5 +67,3 @@ arbitrary = ["dep:arbitrary", "dep:rand", "dep:rand_chacha"]
 
 [lints]
 workspace = true
-
-

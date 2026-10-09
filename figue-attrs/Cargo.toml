@@ -1,16 +1,16 @@
 [package]
-name = "figue-attrs"
-version = "5.0.0-rc.6"
+name = "teamy-figue-attrs"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-authors = ["Amos Wenger <amos@bearcove.eu>"]
+authors = ["Amos Wenger <amos@bearcove.eu>", "TeamDman <TeamDman9201@gmail.com>"]
 license.workspace = true
 repository.workspace = true
-homepage = "https://facet.rs"
+homepage.workspace = true
 keywords = ["cli", "args", "parser", "facet", "command-line"]
 categories = ["command-line-interface"]
-description = "Attribute macros for figue CLI argument parsing"
-documentation = "https://docs.rs/figue-attrs"
+description = "Attribute grammar for the TeamDman Figue fork; internal companion to teamy-figue"
+documentation = "https://docs.rs/teamy-figue-attrs"
 readme = "README.md"
 
 [package.metadata.docs.rs]
@@ -18,6 +18,9 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [package.metadata."docs.rs"]
 rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+[lib]
+name = "figue_attrs"
 
 [dependencies]
 facet.workspace = true

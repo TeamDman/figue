@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Teamy 6.0.0-rc.1 preparation
+
+- Prepare the separately named TeamDman fork for crates.io with exact Teamy Facet 0.50.0-rc.7 dependencies and explicit fork documentation.
+- Carry detailed Markdown help, inherited command options, transparent scalar parsing, PathBuf serialization, and nested `command` help fixes from the reviewed PR stack.
+
 ## [5.0.0-rc.6](https://github.com/bearcove/figue/compare/figue-v5.0.0-rc.5...figue-v5.0.0-rc.6) - 2026-08-20
 
 ### Other

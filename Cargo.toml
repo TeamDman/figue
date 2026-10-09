@@ -3,27 +3,32 @@ resolver = "3"
 members = ["figue", "figue-attrs"]
 
 [workspace.package]
-version = "5.0.0-rc.6"
+version = "6.0.0-rc.1"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/bearcove/figue"
-homepage = "https://github.com/bearcove/figue"
+repository = "https://github.com/TeamDman/figue"
+homepage = "https://github.com/TeamDman/figue"
+
+[workspace.metadata.teamy]
+upstream_figue = "5.0.0-rc.6"
+upstream_revision = "47801613b720a7d5a05a9c8222d90104331823e2"
+fork_branch = "teamy-main"
 
 [workspace.dependencies]
 ariadne = "0.6"
 camino = "1.2.1"
-facet = "0.50.0-rc.7"
-facet-error = "0.50.0-rc.7"
-facet-default = "0.50.0-rc.7"
-facet-core = "0.50.0-rc.7"
-facet-format = "0.50.0-rc.7"
-facet-pretty = "0.50.0-rc.7"
-facet-json = "0.50.0-rc.7"
-facet-reflect = "0.50.0-rc.7"
-facet-solver = "0.50.0-rc.7"
-facet-testhelpers = "0.50.0-rc.7"
-figue = { path = "figue", version = "5.0.0-rc.6" }
+facet = { package = "teamy-facet", path = "../facet/facet", version = "=0.50.0-rc.7" }
+facet-error = { package = "teamy-facet-error", path = "../facet/facet-error", version = "=0.50.0-rc.7" }
+facet-default = { package = "teamy-facet-default", path = "../facet/facet-default", version = "=0.50.0-rc.7" }
+facet-core = { package = "teamy-facet-core", path = "../facet/facet-core", version = "=0.50.0-rc.7" }
+facet-format = { package = "teamy-facet-format", path = "../facet-format/facet-format", version = "=0.50.0-rc.7" }
+facet-pretty = { package = "teamy-facet-pretty", path = "../facet/facet-pretty", version = "=0.50.0-rc.7" }
+facet-json = { package = "teamy-facet-json", path = "../facet-format/facet-json", version = "=0.50.0-rc.7" }
+facet-reflect = { package = "teamy-facet-reflect", path = "../facet/facet-reflect", version = "=0.50.0-rc.7" }
+facet-solver = { package = "teamy-facet-solver", path = "../facet/facet-solver", version = "=0.50.0-rc.7" }
+facet-testhelpers = { package = "teamy-facet-testhelpers", path = "../facet/facet-testhelpers", version = "=0.50.0-rc.7" }
+figue = { package = "teamy-figue", path = "figue", version = "=6.0.0-rc.1" }
 heck = "0.5"
 indexmap = { version = "2.12.1", default-features = false }
 insta = "1.44.3"
@@ -34,7 +39,7 @@ supports-color = "3"
 tempfile = "3.23"
 tracing = { version = "0.1.43", default-features = false, features = ["std", "attributes"] }
 unicode-width = "0.2.2"
-figue-attrs = { path = "figue-attrs", version = "5.0.0-rc.6" }
+figue-attrs = { package = "teamy-figue-attrs", path = "figue-attrs", version = "=6.0.0-rc.1" }
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(facet_no_doc)", "cfg(kani)"] }

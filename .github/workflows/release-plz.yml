@@ -1,14 +1,13 @@
-name: Release-plz
+name: Teamy Figue release
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
   release-plz-release:
+    if: github.repository == 'TeamDman/figue' && github.ref == 'refs/heads/teamy-main'
     name: Release-plz release
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: write
@@ -30,8 +29,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   release-plz-pr:
+    if: github.repository == 'TeamDman/figue' && github.ref == 'refs/heads/teamy-main'
     name: Release-plz PR
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write

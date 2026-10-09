@@ -1,8 +1,12 @@
 +++
-title = "figue"
+title = "Teamy Figue"
 weight = 34
 insert_anchor_links = "heading"
 +++
+
+`teamy-figue` is TeamDman's fork of [upstream Figue](https://github.com/bearcove/figue).
+Use the [Teamy dependency aliases](https://github.com/TeamDman/figue/blob/teamy-main/README.md)
+to select its compatible Facet family. Its Rust library remains `figue`.
 
 `figue` builds typed configuration from CLI arguments, environment variables,
 config files, and code defaults.
@@ -25,7 +29,7 @@ struct Config {
     verbose: bool,
 }
 
-let config: Config = figue::from_slice(&["--verbose", "config.json"])?;
+let config: Config = figue::from_slice(&["--verbose", "config.json"]).into_result()?.value;
 ```
 
-Source: [`figue`](https://github.com/facet-rs/facet/tree/main/figue)
+Source: [`teamy-figue`](https://github.com/TeamDman/figue/tree/teamy-main/figue)

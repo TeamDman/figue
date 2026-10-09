@@ -12,7 +12,18 @@ layered service configuration.
 
 ## Install
 
-Add `facet` and `figue` to your crate.
+This guide is for TeamDman's `teamy-figue` fork. Add the compatible fork
+packages under their canonical dependency names:
+
+```toml
+[dependencies]
+facet = { package = "teamy-facet", version = "=0.50.0-rc.7" }
+figue = { package = "teamy-figue", version = "=6.0.0-rc.1" }
+```
+
+Upstream Facet and Teamy Facet traits are separate package identities.
+See the [fork overview](https://github.com/TeamDman/figue/blob/teamy-main/README.md)
+for the upstream base, additional aliases, and publication status.
 
 ## Minimal example
 

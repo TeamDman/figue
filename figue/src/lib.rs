@@ -1,7 +1,21 @@
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
 // Allow deprecated during transition to new driver-based API
-//! # figue - Layered Configuration for Rust
+//! # Teamy Figue - Layered Configuration for Rust
+//!
+//! `teamy-figue` is TeamDman's fork of [upstream Figue](https://github.com/bearcove/figue),
+//! originally created by Amos Wenger. It is a separate crates.io package with the
+//! canonical Rust library name `figue`, using the Teamy Facet fork throughout.
+//! Upstream Facet and Teamy Facet types have separate package identities.
+//!
+//! ```toml
+//! [dependencies]
+//! facet = { package = "teamy-facet", version = "=0.50.0-rc.7" }
+//! figue = { package = "teamy-figue", version = "=6.0.0-rc.1" }
+//! ```
+//!
+//! See the [fork overview](https://github.com/TeamDman/figue/blob/teamy-main/README.md)
+//! and [fork differences](https://github.com/TeamDman/figue/blob/teamy-main/FORK_DIFFERENCES.md).
 //!
 //! figue provides type-safe, layered configuration parsing with support for:
 //! - **CLI arguments** - Standard command-line argument parsing
@@ -9,8 +23,8 @@
 //! - **Config files** - JSON, and more formats via plugins
 //! - **Defaults from code** - Compile-time defaults
 //!
-//! Built on [facet](https://docs.rs/facet) reflection, figue uses derive macros
-//! to generate parsers at compile time with zero runtime reflection overhead.
+//! Built on [Teamy Facet](https://docs.rs/teamy-facet) reflection, figue derives
+//! configuration schemas from Facet metadata and applies parsing at runtime.
 //!
 //! ## Quick Start
 //!
@@ -686,5 +700,3 @@ mod tests {
         );
     }
 }
-
-

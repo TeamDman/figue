@@ -1,8 +1,25 @@
-# figue
+# teamy-figue
 
-[![crates.io](https://img.shields.io/crates/v/figue.svg)](https://crates.io/crates/figue)
-[![documentation](https://docs.rs/figue/badge.svg)](https://docs.rs/figue)
-[![MIT/Apache-2.0 licensed](https://img.shields.io/crates/l/figue.svg)](https://github.com/bearcove/figue/blob/main/LICENSE-MIT)
+This is **TeamDman's fork of [upstream Figue](https://github.com/bearcove/figue)**,
+originally created by Amos Wenger. `teamy-figue` is a separate crate
+package, using the Teamy Facet fork throughout its dependency graph. The
+Rust library is still named `figue`; upstream and fork Facet types are
+separate identities. Use upstream `figue` unless you need this fork.
+
+```toml
+[dependencies]
+facet = { package = "teamy-facet", version = "=0.50.0-rc.7" }
+figue = { package = "teamy-figue", version = "=6.0.0-rc.1" }
+facet-pretty = { package = "teamy-facet-pretty", version = "=0.50.0-rc.7" }
+```
+
+Version 6.0.0-rc.1 is being prepared against upstream 5.0.0-rc.6 and Teamy
+Facet 0.50.0-rc.7. See the [fork overview](https://github.com/TeamDman/figue/blob/teamy-main/README.md)
+and [maintained differences](https://github.com/TeamDman/figue/blob/teamy-main/FORK_DIFFERENCES.md).
+
+[![crates.io](https://img.shields.io/crates/v/teamy-figue.svg)](https://crates.io/crates/teamy-figue)
+[![documentation](https://docs.rs/teamy-figue/badge.svg)](https://docs.rs/teamy-figue)
+[![MIT/Apache-2.0 licensed](https://img.shields.io/crates/l/teamy-figue.svg)](https://github.com/bearcove/figue/blob/main/LICENSE-MIT)
 
 figue (pronounced 'fig', like the fruit) provides configuration parsing from
 CLI arguments, environment variables, and config files, a bit like
@@ -27,7 +44,7 @@ struct Args {
 }
 
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
-let args: Args = figue::from_slice(&["--verbose", "-j", "14", "example.rs"])?;
+let args: Args = figue::from_slice(&["--verbose", "-j", "14", "example.rs"]).into_result()?.value;
 eprintln!("args: {}", args.pretty());
 Ok(())
 # }
@@ -40,7 +57,7 @@ The entry point of figue is [`builder`] — let yourself be guided from there.
 Color is enabled by default if the terminal supports it. It is disabled when the
 [`NO_COLOR`](https://no-color.org) environment variable is set.
 
-## Sponsors
+## Upstream sponsors
 
 Thanks to all individual sponsors:
 

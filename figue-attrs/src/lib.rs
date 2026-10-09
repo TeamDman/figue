@@ -1,11 +1,16 @@
-//! Attribute macros for figue CLI argument parsing.
+//! Attribute grammar for the TeamDman Figue fork.
+//!
+//! `teamy-figue-attrs` is a separate package from upstream `figue-attrs`,
+//! originally created by Amos Wenger. It uses the Teamy Facet dependency graph
+//! and retains the canonical Rust library name `figue_attrs`.
+//! See the [fork overview](https://github.com/TeamDman/figue/blob/teamy-main/README.md).
 //!
 //! This crate provides the attribute grammar definitions for figue.
 //! It exists as a separate crate to work around Rust's restriction on
 //! accessing macro-expanded `#[macro_export]` macros by absolute paths
 //! within the same crate.
 //!
-//! Users should depend on `figue` directly, which re-exports everything
+//! Users should depend on `teamy-figue` directly, which re-exports everything
 //! from this crate.
 
 #![warn(missing_docs)]
