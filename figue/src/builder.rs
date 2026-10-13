@@ -508,6 +508,16 @@ impl HelpConfigBuilder {
         self
     }
 
+    /// Use a consumer root shape for root type documentation and implementation
+    /// source hints while parsing a wrapper that contributes additional flags.
+    ///
+    /// Parsing, config schemas, and completion generation keep using the
+    /// builder's original type. Subcommand descriptions are not replaced.
+    pub fn root_shape(mut self, shape: &'static facet_core::Shape) -> Self {
+        self.config.root_shape = Some(shape);
+        self
+    }
+
     /// Set the text wrapping width for help output.
     ///
     /// Set to 0 to disable wrapping. Default is 80 columns.

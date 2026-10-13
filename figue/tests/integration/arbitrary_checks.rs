@@ -5,9 +5,13 @@ use figue::{
     assert_to_args_consistency, assert_to_args_roundtrip,
 };
 
-// Deliberately omit Debug from the entire command tree: these tests also
+// Deliberately omit Debug and PartialEq from the entire command tree: these tests also
 // verify the public helpers' trait bounds at compile time.
-#[derive(Facet, Arbitrary, PartialEq)]
+#[allow(
+    dead_code,
+    reason = "Round-trip fixture fields are observed through Facet reflection"
+)]
+#[derive(Facet, Arbitrary)]
 #[repr(u8)]
 enum Command {
     Build {
@@ -20,7 +24,7 @@ enum Command {
     Clean,
 }
 
-#[derive(Facet, Arbitrary, PartialEq)]
+#[derive(Facet, Arbitrary)]
 struct Cli {
     #[facet(args::named)]
     verbose: bool,
@@ -53,7 +57,7 @@ fn exported_roundtrip_helper_smoke_test() {
     .expect("roundtrip helper should succeed");
 }
 
-#[derive(Facet, Arbitrary, PartialEq)]
+#[derive(Facet, Arbitrary)]
 struct GlobalCli {
     #[facet(args::named)]
     count: u16,
@@ -73,7 +77,7 @@ fn exported_global_helpers_work_without_debug() {
 }
 
 // Arbitrary can generate values rejected by parsing's invariant checks.
-#[derive(Facet, Arbitrary, PartialEq)]
+#[derive(Facet, Arbitrary)]
 #[facet(invariants = is_even)]
 struct InvalidValue {
     #[facet(args::named)]
@@ -86,33 +90,41 @@ fn is_even(value: &InvalidValue) -> bool {
 }
 
 // NaN roundtrips through its CLI representation but is not equal to itself.
-// This also verifies that the helper still uses PartialEq for comparisons.
-#[derive(Facet, Arbitrary, PartialEq)]
+// This also verifies that reflected scalar equality preserves NaN semantics.
+#[derive(Facet, Arbitrary)]
 struct NonReflexiveValue {
     #[facet(args::named)]
     #[arbitrary(value = f64::NAN)]
     amount: f64,
 }
 
-#[derive(Facet, Arbitrary, PartialEq)]
+#[allow(
+    dead_code,
+    reason = "Round-trip fixture fields are observed through Facet reflection"
+)]
+#[derive(Facet, Arbitrary)]
 #[repr(u8)]
 enum InvalidValueCommand {
     Run(InvalidValue),
 }
 
-#[derive(Facet, Arbitrary, PartialEq)]
+#[derive(Facet, Arbitrary)]
 struct InvalidValueCli {
     #[facet(args::subcommand)]
     command: InvalidValueCommand,
 }
 
-#[derive(Facet, Arbitrary, PartialEq)]
+#[allow(
+    dead_code,
+    reason = "Round-trip fixture fields are observed through Facet reflection"
+)]
+#[derive(Facet, Arbitrary)]
 #[repr(u8)]
 enum NonReflexiveValueCommand {
     Run(NonReflexiveValue),
 }
 
-#[derive(Facet, Arbitrary, PartialEq)]
+#[derive(Facet, Arbitrary)]
 struct NonReflexiveValueCli {
     #[facet(args::subcommand)]
     command: NonReflexiveValueCommand,
@@ -150,7 +162,7 @@ fn assert_failure_context(error: &ArbitraryCheckError, fragments: &[&str]) {
 
 fn check_roundtrip_failure<T>(fragments: &[&str])
 where
-    T: Facet<'static> + for<'a> Arbitrary<'a> + PartialEq,
+    T: Facet<'static> + for<'a> Arbitrary<'a>,
 {
     let error = assert_to_args_roundtrip::<T>(failure_config())
         .expect_err("the fixture must fail roundtripping");

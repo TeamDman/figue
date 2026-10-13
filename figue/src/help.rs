@@ -5,6 +5,7 @@
 
 use crate::driver::HelpListMode;
 use crate::missing::normalize_program_name;
+use crate::schema::from_schema::docs_from_lines;
 use crate::schema::{
     ArgLevelSchema, ArgSchema, ConfigFieldGroupSchema, ConfigFieldSchema, ConfigStructSchema,
     ConfigValueSchema, Docs, NamedValueMode, Schema, Subcommand,
@@ -13,6 +14,7 @@ use facet_core::Facet;
 use heck::ToKebabCase;
 use owo_colors::OwoColorize;
 use owo_colors::Stream::Stdout;
+use std::borrow::Cow;
 use std::fmt;
 use std::fs;
 use std::io;
@@ -116,10 +118,11 @@ pub(crate) fn generate_root_html_help_with_config_formats_and_anchor(
     initial_anchor: Option<&str>,
 ) -> String {
     let program_name = resolve_program_name(config);
+    let docs = root_docs(schema, config);
     render_html_help_document(HtmlHelpDocument {
         command: &program_name,
         version: config.version.as_deref(),
-        docs: schema.docs(),
+        docs: &docs,
         description: config.description.as_deref(),
         args: schema.args(),
         config_roots: schema.configs(),
@@ -178,16 +181,12 @@ pub(crate) fn generate_html_help_for_subcommand_with_config_formats(
             .values()
             .find(|sub| sub.effective_name() == name)
         else {
-            return render_html_help_document(HtmlHelpDocument {
-                command: &program_name,
-                version: config.version.as_deref(),
-                docs: schema.docs(),
-                description: config.description.as_deref(),
-                args: schema.args(),
-                config_roots: schema.configs(),
+            return generate_root_html_help_with_config_formats_and_anchor(
+                schema,
+                config,
                 config_file_extensions,
-                initial_anchor: None,
-            });
+                None,
+            );
         };
 
         command_path.push(sub.cli_name().to_string());
@@ -246,6 +245,13 @@ pub struct HelpConfig {
     pub version: Option<String>,
     /// Additional description to show after the auto-generated one
     pub description: Option<String>,
+    /// Consumer root shape whose type documentation and implementation source
+    /// hints should be shown when the parsing type is an internal wrapper.
+    ///
+    /// Argument declarations, deserialization, completions, and config schemas
+    /// still use the parsing shape. Subcommand descriptions come from that schema;
+    /// this shape overrides only root type documentation and source traversal.
+    pub root_shape: Option<&'static facet_core::Shape>,
     /// Width for wrapping text (0 = no wrapping)
     pub width: usize,
     /// Whether to include implementation source file information in help output.
@@ -263,6 +269,10 @@ impl fmt::Debug for HelpConfig {
             .field("program_name", &self.program_name)
             .field("version", &self.version)
             .field("description", &self.description)
+            .field(
+                "root_shape",
+                &self.root_shape.map(|shape| shape.type_identifier),
+            )
             .field("width", &self.width)
             .field(
                 "include_implementation_source_file",
@@ -282,6 +292,7 @@ impl Default for HelpConfig {
             program_name: None,
             version: None,
             description: None,
+            root_shape: None,
             width: 80,
             include_implementation_source_file: false,
             implementation_url: None,
@@ -477,6 +488,7 @@ fn append_implementation_source_for_subcommand_path(
     subcommand_path: &[String],
     config: &HelpConfig,
 ) {
+    let root_shape = config.root_shape.unwrap_or(root_shape);
     let Some(source_file) = implementation_source_for_subcommand_path(root_shape, subcommand_path)
     else {
         return;
@@ -666,6 +678,13 @@ fn resolve_cli_chain(schema: &Schema, subcommand_path: &[String]) -> Vec<String>
     cli_path
 }
 
+fn root_docs<'a>(schema: &'a Schema, config: &HelpConfig) -> Cow<'a, Docs> {
+    match config.root_shape {
+        Some(shape) => Cow::Owned(docs_from_lines(shape.doc)),
+        None => Cow::Borrowed(schema.docs()),
+    }
+}
+
 /// Generate help from a built Schema.
 fn generate_help_from_schema(
     schema: &Schema,
@@ -682,13 +701,14 @@ fn generate_help_from_schema(
         out.push_str(&format!("{program_name}\n"));
     }
 
-    // Type doc comment from schema
-    if let Some(summary) = schema.docs().summary() {
+    // Type documentation belongs to the consumer when parsing a wrapper.
+    let docs = root_docs(schema, config);
+    if let Some(summary) = docs.summary() {
         out.push('\n');
         out.push_str(&wrap_text(summary.trim(), "", config.width));
         out.push('\n');
     }
-    if let Some(details) = schema.docs().details() {
+    if let Some(details) = docs.details() {
         out.push('\n');
         out.push_str(details);
         out.push('\n');
@@ -2978,10 +2998,107 @@ fn write_subcommand_help(out: &mut String, sub: &Subcommand, config: &HelpConfig
 }
 
 #[cfg(test)]
+#[path = "help_metadata_test_consumer.rs"]
+mod metadata_test_consumer;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use facet::Facet;
     use figue_attrs as args;
+
+    /// Private parser envelope documentation that consumers should never see.
+    #[derive(Facet)]
+    struct MetadataEnvelope<T> {
+        #[facet(flatten)]
+        application: T,
+        #[facet(flatten)]
+        builtins: crate::FigueBuiltins,
+    }
+
+    fn metadata_help_for(arguments: &[&str]) -> String {
+        let config =
+            crate::builder::builder::<MetadataEnvelope<metadata_test_consumer::ConsumerCli>>()
+                .unwrap()
+                .cli(|cli| cli.args(arguments.iter().copied()).strict())
+                .help(|help| {
+                    help.program_name("consumer")
+                        .root_shape(metadata_test_consumer::ConsumerCli::SHAPE)
+                        .description("Additional user description.")
+                        .include_implementation_source_file(true)
+                        .include_implementation_url(|path| {
+                            format!("https://example.test/{}", path.replace('\\', "/"))
+                        })
+                })
+                .build();
+        match crate::Driver::new(config).run().into_result() {
+            Err(crate::DriverError::Help { text, .. }) => text,
+            Err(error) => panic!("expected help, got {error}"),
+            Ok(_) => panic!("expected help rather than a parsed invocation"),
+        }
+    }
+
+    #[test]
+    fn wrapped_cli_root_metadata_preserves_docs_sources_and_flags() {
+        let help = metadata_help_for(&["--help"]);
+        let source = metadata_test_consumer::ConsumerCli::SHAPE
+            .source_file
+            .unwrap();
+        assert!(help.contains("Consumer root documentation."));
+        assert!(help.contains("Consumer root details."));
+        assert!(help.contains("Additional user description."));
+        assert!(!help.contains("Private parser envelope documentation"));
+        assert!(
+            help.contains("--completions"),
+            "argument declarations still come from the wrapper"
+        );
+        assert!(help.contains(source));
+        assert!(help.contains(&format!(
+            "https://example.test/{}",
+            source.replace('\\', "/")
+        )));
+        assert_ne!(
+            source,
+            MetadataEnvelope::<metadata_test_consumer::ConsumerCli>::SHAPE
+                .source_file
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn wrapped_cli_leaf_help_keeps_leaf_docs_and_consumer_source() {
+        let help = metadata_help_for(&["inspect", "--help"]);
+        let source = metadata_test_consumer::ConsumerLeaf::SHAPE
+            .source_file
+            .unwrap();
+        assert!(help.contains("Consumer leaf command documentation."));
+        assert!(help.contains("Additional user description."));
+        assert!(!help.contains("Consumer root documentation."));
+        assert!(!help.contains("Consumer root details."));
+        assert!(!help.contains("Private parser envelope documentation"));
+        assert!(help.contains(source));
+        assert!(help.contains(&format!(
+            "https://example.test/{}",
+            source.replace('\\', "/")
+        )));
+    }
+
+    #[test]
+    fn wrapped_cli_html_root_metadata_preserves_docs_and_flags() {
+        let config = HelpConfig {
+            program_name: Some("consumer".to_string()),
+            root_shape: Some(metadata_test_consumer::ConsumerCli::SHAPE),
+            description: Some("Additional user description.".to_string()),
+            ..Default::default()
+        };
+        let html =
+            generate_html_help::<MetadataEnvelope<metadata_test_consumer::ConsumerCli>>(&config);
+        assert!(html.contains("Consumer root documentation."));
+        assert!(html.contains("Consumer root details."));
+        assert!(html.contains("Additional user description."));
+        assert!(html.contains("completions"));
+        assert!(!html.contains("Private parser envelope documentation"));
+    }
 
     /// Common arguments that can be flattened into other structs
     #[derive(Facet)]

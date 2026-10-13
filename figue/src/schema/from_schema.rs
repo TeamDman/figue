@@ -294,7 +294,7 @@ fn from_trait_vec_default(
     ))
 }
 
-fn docs_from_lines(lines: &'static [&'static str]) -> Docs {
+pub(crate) fn docs_from_lines(lines: &'static [&'static str]) -> Docs {
     // A doc attribute may contain several physical lines (for example, a block
     // comment or #[doc = include_str!(...)]). Empty attributes are blank lines.
     let lines = lines

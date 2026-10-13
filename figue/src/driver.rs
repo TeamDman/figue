@@ -1025,6 +1025,13 @@ impl<T> DriverOutcome<T> {
         Self(Err(error))
     }
 
+    /// Transform a successfully parsed value while retaining its report and
+    /// extraction metadata. Errors and successful early exits pass through
+    /// unchanged without calling the mapper.
+    pub fn map<U>(self, mapper: impl FnOnce(T) -> U) -> DriverOutcome<U> {
+        DriverOutcome(self.0.map(|output| output.map(mapper)))
+    }
+
     /// Convert to a standard `Result` for manual handling.
     ///
     /// Use this when you need to inspect the error yourself (e.g., in tests, or to
@@ -1207,6 +1214,19 @@ impl<T: std::fmt::Debug> std::fmt::Debug for DriverOutput<T> {
 }
 
 impl<T> DriverOutput<T> {
+    /// Transform the parsed value while retaining diagnostics and the original
+    /// merged configuration and schema used by [`Self::extract`].
+    ///
+    /// Mapping does not print warnings or reinterpret the source configuration.
+    pub fn map<U>(self, mapper: impl FnOnce(T) -> U) -> DriverOutput<U> {
+        DriverOutput {
+            value: mapper(self.value),
+            report: self.report,
+            merged_config: self.merged_config,
+            schema: self.schema,
+        }
+    }
+
     /// Get the value, printing any warnings to stderr.
     pub fn get(self) -> T {
         self.print_warnings();
@@ -1784,6 +1804,98 @@ mod tests {
     use facet::Facet;
     use facet_testhelpers::test;
 
+    #[test]
+    fn mapping_a_parsed_value_preserves_reports_and_extraction() {
+        #[derive(Facet)]
+        struct MapArgs {
+            #[facet(figue::config, figue::env_prefix = "SYNTHETIC")]
+            config: MapConfig,
+        }
+        #[derive(Facet)]
+        struct MapConfig {
+            message: Option<String>,
+            required: Option<String>,
+        }
+        #[derive(Facet)]
+        struct MessageRequirements {
+            #[facet(figue::origin = "config.message")]
+            message: String,
+        }
+        #[derive(Facet, Debug)]
+        struct MissingRequirements {
+            #[facet(figue::origin = "config.required")]
+            required: String,
+        }
+
+        let config = builder::<MapArgs>()
+            .unwrap()
+            .cli(|cli| cli.args(["--config.message", "synthetic message"]).strict())
+            .build();
+        let mut output = Driver::new(config).run().into_result().unwrap();
+        let missing_hint = output
+            .extract::<MissingRequirements>()
+            .unwrap_err()
+            .missing_fields[0]
+            .env_hint
+            .clone();
+        assert!(
+            missing_hint.is_some(),
+            "the source schema carries the environment hint"
+        );
+        let cli_args_source = output.report.cli_args_source.clone();
+        output.report.diagnostics.push(Diagnostic {
+            message: "synthetic retained warning".to_string(),
+            label: None,
+            path: None,
+            span: None,
+            severity: Severity::Warning,
+        });
+
+        let output = DriverOutcome::ok(output)
+            .map(|args| args.config.message.unwrap())
+            .into_result()
+            .unwrap();
+        assert_eq!(output.value, "synthetic message");
+        assert_eq!(output.report.cli_args_source, cli_args_source);
+        assert!(output.report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message == "synthetic retained warning"
+                && diagnostic.severity == Severity::Warning
+        }));
+        assert_eq!(
+            output.extract::<MessageRequirements>().unwrap().message,
+            "synthetic message",
+        );
+        assert_eq!(
+            output
+                .extract::<MissingRequirements>()
+                .unwrap_err()
+                .missing_fields[0]
+                .env_hint,
+            missing_hint,
+        );
+    }
+
+    #[test]
+    fn mapping_skips_the_callback_for_errors_and_early_exits() {
+        for arguments in [&["--help"][..], &["--unrecognized-flag"][..]] {
+            let config = builder::<ArgsWithBuiltins>()
+                .unwrap()
+                .cli(|cli| cli.args(arguments.iter().copied()).strict())
+                .build();
+            let error = Driver::new(config).run().unwrap_err();
+            let expected_message = error.to_string();
+            let expected_success = error.is_success();
+            let called = std::cell::Cell::new(false);
+            let error = DriverOutcome::<ArgsWithBuiltins>::err(error)
+                .map(|_| called.set(true))
+                .unwrap_err();
+
+            assert!(!called.get());
+            assert_eq!(error.is_success(), expected_success);
+            assert_eq!(error.to_string(), expected_message);
+        }
+    }
+
     /// Args struct with FigueBuiltins flattened in
     #[derive(Facet, Debug)]
     struct ArgsWithBuiltins {
@@ -2002,7 +2114,10 @@ mod tests {
         match result {
             Err(DriverError::Help { text, .. }) => {
                 let text = strip_ansi_escapes::strip_str(&text);
-                assert_eq!(text, "test-app db create\ntest-app db run\ntest-app db rollback");
+                assert_eq!(
+                    text,
+                    "test-app db create\ntest-app db run\ntest-app db rollback"
+                );
             }
             other => panic!("expected DriverError::Help, got {:?}", other),
         }

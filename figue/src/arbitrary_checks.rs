@@ -11,6 +11,7 @@ use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
 use crate::ToArgs;
+use crate::arbitrary_value_comparison::compare_arbitrary_values;
 use crate::config_value_parser::from_config_value;
 use crate::layers::cli::{CliConfigBuilder, parse_cli};
 use crate::schema::{ArgKind, ArgLevelSchema, ArgSchema, Schema};
@@ -236,11 +237,13 @@ where
 /// 2. args -> parse with `Driver` (strict CLI mode)
 /// 3. parsed value equals original value
 ///
-/// Values are compared using [`PartialEq`]. Failure diagnostics use Facet
-/// reflection, so `T` does not need to implement [`Debug`](core::fmt::Debug).
+/// Values are compared structurally through Facet, including every reflected
+/// struct field and active enum field. Scalar and opaque leaves use their
+/// reflected equality operation. Unsupported equality is an explicit error.
+/// `T` does not need to implement `PartialEq` or [`Debug`](core::fmt::Debug).
 pub fn assert_to_args_roundtrip<T>(config: TestToArgsRoundTrip) -> Result<(), ArbitraryCheckError>
 where
-    T: Facet<'static> + for<'a> Arbitrary<'a> + PartialEq,
+    T: Facet<'static> + for<'a> Arbitrary<'a>,
 {
     let schema = Schema::from_shape(T::SHAPE).map_err(|error| ArbitraryCheckError {
         successful_samples: 0,
@@ -305,12 +308,22 @@ where
         }
         })?;
 
-        if instance != parsed {
+        let difference =
+            compare_arbitrary_values(&instance, &parsed).map_err(|error| ArbitraryCheckError {
+                successful_samples: total_successful_samples,
+                attempts: total_attempts,
+                message: format!(
+                    "roundtrip comparison failed for path {:?}\nerror={error}\nargs={args:?}\n{}",
+                    command_paths[leaf_id],
+                    entropy_pool.context_suffix()
+                ),
+            })?;
+        if let Some(difference) = difference {
             return Err(ArbitraryCheckError {
                 successful_samples: total_successful_samples,
                 attempts: total_attempts,
                 message: format!(
-                    "roundtrip mismatch for path {:?}\noriginal={}\nparsed={}\nargs={args:?}\n{}",
+                    "roundtrip mismatch for path {:?}\ndifference={difference}\noriginal={}\nparsed={}\nargs={args:?}\n{}",
                     command_paths[leaf_id],
                     format_generated_value(&instance),
                     format_generated_value(&parsed),
@@ -357,7 +370,7 @@ fn assert_to_args_roundtrip_global<T>(
     config: TestToArgsRoundTrip,
 ) -> Result<(), ArbitraryCheckError>
 where
-    T: Facet<'static> + for<'a> Arbitrary<'a> + PartialEq,
+    T: Facet<'static> + for<'a> Arbitrary<'a>,
 {
     let schema = Schema::from_shape(T::SHAPE).map_err(|error| ArbitraryCheckError {
         successful_samples: 0,
@@ -401,12 +414,21 @@ where
             }
         })?;
 
-        if instance != parsed {
+        let difference =
+            compare_arbitrary_values(&instance, &parsed).map_err(|error| ArbitraryCheckError {
+                successful_samples,
+                attempts,
+                message: format!(
+                    "roundtrip comparison failed\nerror={error}\nargs={args:?}\n{}",
+                    entropy_pool.context_suffix()
+                ),
+            })?;
+        if let Some(difference) = difference {
             return Err(ArbitraryCheckError {
                 successful_samples,
                 attempts,
                 message: format!(
-                    "roundtrip mismatch\noriginal={}\nparsed={}\nargs={args:?}\n{}",
+                    "roundtrip mismatch\ndifference={difference}\noriginal={}\nparsed={}\nargs={args:?}\n{}",
                     format_generated_value(&instance),
                     format_generated_value(&parsed),
                     entropy_pool.context_suffix()
@@ -630,7 +652,11 @@ mod tests {
     use std::time::Duration;
     use std::time::Instant;
 
-    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[allow(
+        dead_code,
+        reason = "Round-trip fixtures are inspected through Facet reflection"
+    )]
+    #[derive(Facet, arbitrary::Arbitrary, Debug)]
     #[repr(u8)]
     enum Command {
         Build {
@@ -640,7 +666,11 @@ mod tests {
         Clean,
     }
 
-    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[allow(
+        dead_code,
+        reason = "Round-trip fixtures are inspected through Facet reflection"
+    )]
+    #[derive(Facet, arbitrary::Arbitrary, Debug)]
     #[repr(u8)]
     enum NestedAction {
         Set {
@@ -650,7 +680,11 @@ mod tests {
         Get,
     }
 
-    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[allow(
+        dead_code,
+        reason = "Round-trip fixtures are inspected through Facet reflection"
+    )]
+    #[derive(Facet, arbitrary::Arbitrary, Debug)]
     #[repr(u8)]
     enum NestedCommand {
         Output {
@@ -659,13 +693,13 @@ mod tests {
         },
     }
 
-    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[derive(Facet, arbitrary::Arbitrary, Debug)]
     struct NestedCli {
         #[facet(args::subcommand)]
         command: NestedCommand,
     }
 
-    #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]
+    #[derive(Facet, arbitrary::Arbitrary, Debug)]
     struct Cli {
         #[facet(args::named)]
         verbose: bool,
@@ -698,12 +732,6 @@ mod tests {
 
         #[facet(args::subcommand)]
         command: VendoredCommand,
-    }
-
-    impl PartialEq for VendoredDiscordArchiveCli {
-        fn eq(&self, other: &Self) -> bool {
-            self.global_args == other.global_args && self.command == other.command
-        }
     }
 
     #[derive(Facet, arbitrary::Arbitrary, Debug, PartialEq)]

@@ -3,7 +3,7 @@
 This is **TeamDman's fork of the upstream Figue attribute grammar**, originally
 created by Amos Wenger. `teamy-figue-attrs` is a separate package from upstream
 `figue-attrs`. It uses Teamy Facet 0.50.0-rc.7 and matches `teamy-figue`
-6.0.0-rc.1; applications should use `teamy-figue`, which re-exports the grammar.
+6.0.0-rc.2; applications should use `teamy-figue`, which re-exports the grammar.
 See the [fork overview](https://github.com/TeamDman/figue/blob/teamy-main/README.md).
 
 [![crates.io](https://img.shields.io/crates/v/teamy-figue-attrs.svg)](https://crates.io/crates/teamy-figue-attrs)

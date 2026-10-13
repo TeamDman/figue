@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Teamy 6.0.0-rc.1 preparation
+## [Teamy 6.0.0-rc.2] - 2026-10-13
+
+- Keep the attribute companion version aligned with Teamy Figue 6.0.0-rc.2.
+
+## [Teamy 6.0.0-rc.1]
 
 - Prepare the separately named TeamDman fork for crates.io with exact Teamy Facet 0.50.0-rc.7 dependencies and explicit fork documentation.
 

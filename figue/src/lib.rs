@@ -179,6 +179,8 @@ mod macros;
 /// Arbitrary-based helper assertions for consumer roundtrip tests.
 #[cfg(feature = "arbitrary")]
 pub mod arbitrary_checks;
+#[cfg(feature = "arbitrary")]
+mod arbitrary_value_comparison;
 
 pub(crate) mod builder;
 pub(crate) mod color;
@@ -500,7 +502,7 @@ pub fn from_slice<T: Facet<'static>>(args: &[&str]) -> DriverOutcome<T> {
 ///     _ => panic!("expected help"),
 /// }
 /// ```
-#[derive(facet::Facet, Default, Debug)]
+#[derive(facet::Facet, Default, Debug, PartialEq, Eq)]
 pub struct FigueBuiltins {
     /// Show help message and exit.
     #[facet(args::named, args::short = 'h', args::help, default)]

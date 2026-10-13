@@ -9,9 +9,8 @@ The maintained fork branch is [`teamy-main`](https://github.com/TeamDman/figue/t
 The old published branch is retained as `legacy/published-main-2026-10-09`.
 The current upstream base is Figue **5.0.0-rc.6**, at commit
 [`4780161`](https://github.com/bearcove/figue/commit/47801613b720a7d5a05a9c8222d90104331823e2).
-The fork release being prepared is **6.0.0-rc.1**; its version is independent
-of the upstream release. These versions are publication targets until they
-appear on crates.io.
+The fork release is **6.0.0-rc.2**; its version is independent of the
+upstream release.
 
 ## Dependencies
 
@@ -22,7 +21,7 @@ application. Alias the packages to their canonical Rust dependency names:
 ```toml
 [dependencies]
 facet = { package = "teamy-facet", version = "=0.50.0-rc.7" }
-figue = { package = "teamy-figue", version = "=6.0.0-rc.1" }
+figue = { package = "teamy-figue", version = "=6.0.0-rc.2" }
 ```
 
 Rust imports remain `facet` and `figue`, including `use figue as args` for

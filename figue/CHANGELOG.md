@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Teamy 6.0.0-rc.1 preparation
+## [Teamy 6.0.0-rc.2] - 2026-10-13
+
+- Map parsed values while retaining driver diagnostics and configuration extraction metadata.
+- Support a consumer-owned help root when parsing an internal CLI wrapper, preserving root documentation and command source hints.
+- Compare arbitrary round-trip values through Facet structure without requiring CLI schemas to implement `PartialEq`.
+- Add `PartialEq` and `Eq` to `FigueBuiltins`.
+- External exhaustive `HelpConfig` literals must add `root_shape: None` or use `..Default::default()` for the new optional metadata field.
+
+## [Teamy 6.0.0-rc.1]
 
 - Prepare the separately named TeamDman fork for crates.io with exact Teamy Facet 0.50.0-rc.7 dependencies and explicit fork documentation.
 - Carry detailed Markdown help, inherited command options, transparent scalar parsing, PathBuf serialization, and nested `command` help fixes from the reviewed PR stack.
