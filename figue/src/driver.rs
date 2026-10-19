@@ -180,6 +180,7 @@ impl<T: Facet<'static>> Driver<T> {
         let mut layers = ConfigLayers::default();
         let mut all_diagnostics = Vec::new();
         let mut file_resolution = None;
+        let mut invalid_subcommand_path = false;
 
         // Get CLI args source for Ariadne error display
         // None means no arguments were provided (used for better error formatting)
@@ -210,7 +211,9 @@ impl<T: Facet<'static>> Driver<T> {
 
         // 1b. CLI layer (parsed first to get config file path)
         if let Some(ref cli_config) = self.config.cli_config {
-            layers.cli = parse_cli(&self.config.schema, cli_config);
+            let output = parse_cli(&self.config.schema, cli_config);
+            invalid_subcommand_path = output.invalid_subcommand_path;
+            layers.cli = output.layer;
             tracing::debug!(cli_value = ?layers.cli.value, "driver: parsed CLI layer");
             all_diagnostics.extend(layers.cli.diagnostics.iter().cloned());
         }
@@ -242,9 +245,12 @@ impl<T: Facet<'static>> Driver<T> {
             let special = self.config.schema.special();
 
             // Check for --help
+            // Invalid work arguments do not block help, but an invalid command
+            // path must not silently select a recovered partial help target.
             if let Some(ref help_path) = special.help
                 && let Some(ConfigValue::Bool(b)) = cli_value.get_by_path(help_path)
                 && b.value
+                && !invalid_subcommand_path
             {
                 let help_config = self
                     .config
@@ -290,6 +296,7 @@ impl<T: Facet<'static>> Driver<T> {
             if let Some(ref html_help_path) = special.html_help
                 && let Some(ConfigValue::Bool(b)) = cli_value.get_by_path(html_help_path)
                 && b.value
+                && !invalid_subcommand_path
             {
                 let help_config = self
                     .config
@@ -2697,7 +2704,7 @@ mod tests {
 
         // Parse CLI args
         let cli_config = CliConfigBuilder::new().args(["build", "--release"]).build();
-        let output = parse_cli(&schema, &cli_config);
+        let output = parse_cli(&schema, &cli_config).layer;
 
         assert!(output.diagnostics.is_empty(), "should have no diagnostics");
 

@@ -15,6 +15,9 @@ Breaking changes for fork consumers still require an appropriate fork release.
 
 ## Changes carried on teamy-main
 
+- Terminal and HTML help reject invalid command paths instead of describing a
+  partially parsed command. Valid help requests still bypass invalid work
+  arguments and configuration, and version requests remain path-independent.
 - Help retains detailed Markdown documentation while presenting wrapped
   paragraph summaries in terminal output.
 - Nested command help includes inherited options and handles subcommands
