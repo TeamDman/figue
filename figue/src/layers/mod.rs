@@ -9,5 +9,6 @@
 //! - `file`: Configuration file parsing
 
 pub mod cli;
+pub(crate) mod cli_parse_output;
 pub mod env;
 pub mod file;

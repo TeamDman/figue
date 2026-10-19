@@ -624,7 +624,7 @@ where
     T: Facet<'static>,
 {
     let cli_config = CliConfigBuilder::new().args_os(args).strict().build();
-    let layer_output = parse_cli(schema, &cli_config);
+    let layer_output = parse_cli(schema, &cli_config).layer;
 
     if !layer_output.diagnostics.is_empty() {
         let diagnostics = layer_output

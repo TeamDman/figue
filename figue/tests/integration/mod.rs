@@ -4,6 +4,7 @@ mod deser_errors;
 mod env_subst;
 mod err;
 mod help;
+mod help_command_path;
 mod inherited_help;
 mod json_schema;
 mod layered;

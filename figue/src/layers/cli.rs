@@ -37,6 +37,7 @@ use indexmap::IndexMap;
 
 use crate::config_value::{ConfigValue, EnumValue, Sourced};
 use crate::driver::{Diagnostic, HelpListMode, LayerOutput, Severity};
+use crate::layers::cli_parse_output::CliParseOutput;
 use crate::provenance::Provenance;
 use crate::schema::{
     ArgKind, ArgLevelSchema, ArgSchema, ConfigStructSchema, ConfigValueSchema, NamedValueMode,
@@ -133,12 +134,12 @@ impl CliConfigBuilder {
     }
 }
 
-/// Parse CLI arguments using the schema, returning a LayerOutput.
+/// Parse CLI arguments using the schema, returning layer values and CLI metadata.
 ///
 /// This handles both:
 /// - `schema.args`: top-level flags, positionals, subcommands
 /// - `schema.config` overrides: `--config.port 8080` style dotted paths
-pub fn parse_cli(schema: &Schema, cli_config: &CliConfig) -> LayerOutput {
+pub(crate) fn parse_cli(schema: &Schema, cli_config: &CliConfig) -> CliParseOutput {
     let args = cli_config.resolve_args();
     let args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     let mut ctx = ParseContext::new(&args, schema);
@@ -231,6 +232,8 @@ struct ParseContext<'a> {
     config_file_paths: IndexMap<String, camino::Utf8PathBuf, RandomState>,
     /// Requested pseudo-help list mode (`help list`), if any.
     help_list_mode: Option<HelpListMode>,
+    /// Whether parsing recovered past an invalid token at a command level.
+    invalid_subcommand_path: bool,
 }
 
 impl<'a> ParseContext<'a> {
@@ -271,6 +274,7 @@ impl<'a> ParseContext<'a> {
             config_builders,
             config_file_paths: IndexMap::default(),
             help_list_mode: None,
+            invalid_subcommand_path: false,
         }
     }
 
@@ -321,6 +325,7 @@ impl<'a> ParseContext<'a> {
             // In positional-only mode, everything is a positional
             if self.positional_only {
                 if !self.try_parse_positional(level) && !self.try_parse_subcommand(level) {
+                    self.invalid_subcommand_path |= !level.subcommands().is_empty();
                     let suggestion = self.suggest_subcommand_if_expected(arg, level);
                     self.emit_error(format!(
                         "unexpected positional argument: {}{}",
@@ -339,6 +344,7 @@ impl<'a> ParseContext<'a> {
             } else {
                 // Positional or subcommand
                 if !self.try_parse_subcommand(level) && !self.try_parse_positional(level) {
+                    self.invalid_subcommand_path |= !level.subcommands().is_empty();
                     let suggestion = self.suggest_subcommand_if_expected(arg, level);
                     self.emit_error(format!("unexpected argument: {}{}", arg, suggestion));
                     self.index += 1;
@@ -1667,7 +1673,7 @@ impl<'a> ParseContext<'a> {
         });
     }
 
-    fn into_output(mut self) -> LayerOutput {
+    fn into_output(mut self) -> CliParseOutput {
         // Merge config builder output if present
         let mut unused_keys = Vec::new();
         let mut diagnostics = self.diagnostics;
@@ -1709,13 +1715,16 @@ impl<'a> ParseContext<'a> {
             }))
         };
 
-        LayerOutput {
-            value,
-            unused_keys,
-            diagnostics,
-            source_text: None,
-            config_file_paths: self.config_file_paths,
-            help_list_mode: self.help_list_mode,
+        CliParseOutput {
+            layer: LayerOutput {
+                value,
+                unused_keys,
+                diagnostics,
+                source_text: None,
+                config_file_paths: self.config_file_paths,
+                help_list_mode: self.help_list_mode,
+            },
+            invalid_subcommand_path: self.invalid_subcommand_path,
         }
     }
 }
@@ -1812,7 +1821,7 @@ mod tests {
         let schema = Schema::from_shape(T::SHAPE).expect("valid schema");
         tracing::debug!(args = ?schema.args().args().keys().collect::<Vec<_>>(), "Schema args");
         let config = cli_config(args);
-        let output = parse_cli(&schema, &config);
+        let output = parse_cli(&schema, &config).layer;
 
         assert!(
             output.diagnostics.is_empty(),
@@ -1828,7 +1837,7 @@ mod tests {
     fn assert_diagnostic_contains<T: Facet<'static>>(args: &[&str], expected_msg: &str) {
         let schema = Schema::from_shape(T::SHAPE).expect("valid schema");
         let config = cli_config(args);
-        let output = parse_cli(&schema, &config);
+        let output = parse_cli(&schema, &config).layer;
 
         assert!(
             output
