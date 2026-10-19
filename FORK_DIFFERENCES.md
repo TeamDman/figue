@@ -1,6 +1,6 @@
 # Teamy Figue fork differences
 
-This document describes `teamy-figue` **6.0.0-rc.2** relative to upstream
+This document describes `teamy-figue` **6.0.0-rc.4** relative to upstream
 Figue **5.0.0-rc.6** at
 [`4780161`](https://github.com/bearcove/figue/commit/47801613b720a7d5a05a9c8222d90104331823e2).
 The exact upstream base is also recorded in `workspace.metadata.teamy`.
@@ -8,9 +8,10 @@ The exact upstream base is also recorded in `workspace.metadata.teamy`.
 ## Package identity and versions
 
 The published packages are `teamy-figue` and `teamy-figue-attrs`, with canonical
-Rust library names `figue` and `figue_attrs`. Both use matching Teamy-controlled
-versions, currently `6.0.0-rc.2`, against the exact Teamy Facet `0.50.0-rc.7`
-family. Teamy version numbers do not promise interchangeability with upstream.
+Rust library names `figue` and `figue_attrs`. Figue is `6.0.0-rc.4`; its
+unchanged attributes companion remains `6.0.0-rc.3`. Core Facet uses
+`0.50.0-rc.7`, while Format and JSON use `0.50.0-rc.8` for cooperative
+serialization cancellation and caller-owned writer support. Teamy version numbers do not promise interchangeability with upstream.
 Breaking changes for fork consumers still require an appropriate fork release.
 
 ## Changes carried on teamy-main

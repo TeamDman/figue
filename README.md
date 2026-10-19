@@ -9,24 +9,24 @@ The maintained fork branch is [`teamy-main`](https://github.com/TeamDman/figue/t
 The old published branch is retained as `legacy/published-main-2026-10-09`.
 The current upstream base is Figue **5.0.0-rc.6**, at commit
 [`4780161`](https://github.com/bearcove/figue/commit/47801613b720a7d5a05a9c8222d90104331823e2).
-The fork release is **6.0.0-rc.3**; its version is independent of the
+The fork release is **6.0.0-rc.4**; its version is independent of the
 upstream release.
 
 ## Dependencies
 
-This release uses the separately named **Teamy Facet 0.50.0-rc.7** package
-family. Keep one compatible reflection implementation throughout your
+This release uses **Teamy Facet core 0.50.0-rc.7** with
+**Teamy Format/JSON 0.50.0-rc.8** and **Figue Attrs 6.0.0-rc.3**. Keep one compatible reflection implementation throughout your
 application. Alias the packages to their canonical Rust dependency names:
 
 ```toml
 [dependencies]
 facet = { package = "teamy-facet", version = "=0.50.0-rc.7" }
-figue = { package = "teamy-figue", version = "=6.0.0-rc.3" }
+figue = { package = "teamy-figue", version = "=6.0.0-rc.4" }
 ```
 
 Rust imports remain `facet` and `figue`, including `use figue as args` for
 attributes. Other reflection dependencies must use matching Teamy packages,
-for example `facet-json = { package = "teamy-facet-json", version = "=0.50.0-rc.7" }`.
+for example `facet-json = { package = "teamy-facet-json", version = "=0.50.0-rc.8" }`.
 Upstream and Teamy Facet traits and shapes belong to different package
 identities; a type derived against upstream Facet cannot be passed directly
 to this fork's Figue APIs. Consumers need no `[patch.crates-io]` section.

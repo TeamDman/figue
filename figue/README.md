@@ -9,12 +9,13 @@ separate identities. Use upstream `figue` unless you need this fork.
 ```toml
 [dependencies]
 facet = { package = "teamy-facet", version = "=0.50.0-rc.7" }
-figue = { package = "teamy-figue", version = "=6.0.0-rc.3" }
+figue = { package = "teamy-figue", version = "=6.0.0-rc.4" }
 facet-pretty = { package = "teamy-facet-pretty", version = "=0.50.0-rc.7" }
 ```
 
-Version 6.0.0-rc.3 is based on upstream 5.0.0-rc.6 and Teamy
-Facet 0.50.0-rc.7. See the [fork overview](https://github.com/TeamDman/figue/blob/teamy-main/README.md)
+Version 6.0.0-rc.4 is based on upstream 5.0.0-rc.6 and Teamy
+Facet core 0.50.0-rc.7, Format/JSON 0.50.0-rc.8, and
+Figue Attrs 6.0.0-rc.3. See the [fork overview](https://github.com/TeamDman/figue/blob/teamy-main/README.md)
 and [maintained differences](https://github.com/TeamDman/figue/blob/teamy-main/FORK_DIFFERENCES.md).
 
 [![crates.io](https://img.shields.io/crates/v/teamy-figue.svg)](https://crates.io/crates/teamy-figue)

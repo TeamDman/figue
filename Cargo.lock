@@ -1688,7 +1688,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-facet-format"
-version = "0.50.0-rc.7"
+version = "0.50.0-rc.8"
 dependencies = [
  "teamy-facet-core",
  "teamy-facet-dessert",
@@ -1700,7 +1700,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-facet-json"
-version = "0.50.0-rc.7"
+version = "0.50.0-rc.8"
 dependencies = [
  "teamy-facet",
  "teamy-facet-core",
@@ -1804,7 +1804,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-figue"
-version = "6.0.0-rc.3"
+version = "6.0.0-rc.4"
 dependencies = [
  "arbitrary",
  "ariadne",
