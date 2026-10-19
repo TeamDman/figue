@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [Teamy 6.0.0-rc.3] - 2026-10-19
+
 - Reject invalid command paths before showing terminal or HTML help, instead of
   silently displaying help for a partially parsed path. Help still bypasses
   invalid work arguments and configuration; version requests remain independent

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [Teamy 6.0.0-rc.3] - 2026-10-19
+
+- Keep the attribute companion version aligned with Teamy Figue 6.0.0-rc.3.
+
 ## [Teamy 6.0.0-rc.2] - 2026-10-13
 
 - Keep the attribute companion version aligned with Teamy Figue 6.0.0-rc.2.

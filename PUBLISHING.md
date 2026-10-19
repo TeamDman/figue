@@ -1,7 +1,7 @@
 # Publishing the Teamy Figue fork
 
 The publication targets are `teamy-figue-attrs` and `teamy-figue`, both at
-`6.0.0-rc.1`. These are TeamDman fork packages, not upstream releases.
+`6.0.0-rc.3`. These are TeamDman fork packages, not upstream releases.
 
 First publish the complete compatible Teamy Facet `0.50.0-rc.7` dependency
 closure from the sibling `facet` and `facet-format` forks. Each Figue manifest
