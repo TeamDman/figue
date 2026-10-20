@@ -11,7 +11,7 @@
 //! ```toml
 //! [dependencies]
 //! facet = { package = "teamy-facet", version = "=0.50.0-rc.7" }
-//! figue = { package = "teamy-figue", version = "=6.0.0-rc.1" }
+//! figue = { package = "teamy-figue", version = "=6.0.0-rc.5" }
 //! ```
 //!
 //! See the [fork overview](https://github.com/TeamDman/figue/blob/teamy-main/README.md)

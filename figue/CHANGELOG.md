@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [Teamy 6.0.0-rc.5] - 2026-10-20
+
+- Update the exact Teamy Format and JSON dependencies to `0.50.0-rc.9`, retaining
+  Facet core `0.50.0-rc.7` and Figue Attrs `6.0.0-rc.3`. This compatibility
+  release supports incremental writer serialization and caller-owned cancellation
+  without Cargo patches; Figue parsing behavior is unchanged.
+
 ## [Teamy 6.0.0-rc.3] - 2026-10-19
 
 - Reject invalid command paths before showing terminal or HTML help, instead of
