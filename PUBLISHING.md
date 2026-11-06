@@ -1,13 +1,15 @@
 # Publishing the Teamy Figue fork
 
-The current publication target is `teamy-figue 6.0.0-rc.5`. It reuses the already
-published `teamy-figue-attrs 6.0.0-rc.3`; do not publish a new attributes version
-for this dependency-only release. These are TeamDman fork packages, not upstream
-releases.
+The current publication targets are `teamy-figue-attrs 6.0.0-rc.4`, followed by
+`teamy-figue 6.0.0-rc.6`. The attribute grammar is unchanged, but its exact
+Facet dependency must align with the new facade. These are TeamDman fork
+packages, not upstream releases.
 
-First publish the compatible Teamy dependency closure: Facet core
-`0.50.0-rc.7` and Format/JSON `0.50.0-rc.9`, from the sibling `facet` and
-`facet-format` forks. Each Figue manifest uses exact Teamy package versions
+First publish the changed Teamy dependency closure: Facet facade, macro crates,
+Error, and Default at `0.50.0-rc.8`, plus Format/JSON at `0.50.0-rc.10`, from
+the sibling `facet` and `facet-format` forks. Core, Reflect, Pretty, and the
+other unchanged core packages remain at the published `0.50.0-rc.7` versions.
+Each Figue manifest uses exact Teamy package versions
 alongside local paths. Cargo replaces local path dependencies with the declared
 registry dependencies when packaging; missing registry packages must be published
 first.
@@ -15,6 +17,10 @@ first.
 Once those packages are available, inspect the archive and publish:
 
 ```powershell
+cargo package -p teamy-figue-attrs --list
+cargo publish -p teamy-figue-attrs --dry-run
+cargo publish -p teamy-figue-attrs
+# Wait for the new attributes version to become available on crates.io.
 cargo package -p teamy-figue --list
 cargo publish -p teamy-figue --dry-run
 cargo publish -p teamy-figue
@@ -23,8 +29,9 @@ cargo publish -p teamy-figue
 Wait for crates.io to make each dependency available before packaging its
 consumers. Review the changes, versions, fork README files, and package
 contents before executing the publishing commands. Do not bypass package
-verification to conceal a dependency mismatch. When the attribute grammar itself
-changes, publish its new version before the Figue version that depends on it.
+verification to conceal a dependency mismatch. Publish a new attribute package
+before its consuming Figue package whenever its grammar or exact dependencies
+change.
 
 Local development uses sibling fork paths; downstream consumers use the
 package aliases shown in the README and need no root-level patch. `target/`

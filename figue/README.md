@@ -8,14 +8,16 @@ separate identities. Use upstream `figue` unless you need this fork.
 
 ```toml
 [dependencies]
-facet = { package = "teamy-facet", version = "=0.50.0-rc.7" }
-figue = { package = "teamy-figue", version = "=6.0.0-rc.5" }
+facet = { package = "teamy-facet", version = "=0.50.0-rc.8" }
+figue = { package = "teamy-figue", version = "=6.0.0-rc.6" }
 facet-pretty = { package = "teamy-facet-pretty", version = "=0.50.0-rc.7" }
 ```
 
-Version 6.0.0-rc.5 is based on upstream 5.0.0-rc.6 and Teamy
-Facet core 0.50.0-rc.7, Format/JSON 0.50.0-rc.9, and
-Figue Attrs 6.0.0-rc.3. See the [fork overview](https://github.com/TeamDman/figue/blob/teamy-main/README.md)
+The prepared 6.0.0-rc.6 release is based on upstream 5.0.0-rc.6 and uses
+Teamy Facet facade 0.50.0-rc.8, unchanged Core/Reflect 0.50.0-rc.7,
+Format/JSON 0.50.0-rc.10, and Figue Attrs 6.0.0-rc.4. This aligns the graph
+with the generic field-proxy and `Cow<T>` decoding fixes.
+See the [fork overview](https://github.com/TeamDman/figue/blob/teamy-main/README.md)
 and [maintained differences](https://github.com/TeamDman/figue/blob/teamy-main/FORK_DIFFERENCES.md).
 
 [![crates.io](https://img.shields.io/crates/v/teamy-figue.svg)](https://crates.io/crates/teamy-figue)

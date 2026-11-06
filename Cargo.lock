@@ -1624,7 +1624,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-facet"
-version = "0.50.0-rc.7"
+version = "0.50.0-rc.8"
 dependencies = [
  "autocfg",
  "teamy-facet-core",
@@ -1666,7 +1666,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-facet-default"
-version = "0.50.0-rc.7"
+version = "0.50.0-rc.8"
 dependencies = [
  "teamy-facet",
 ]
@@ -1681,14 +1681,14 @@ dependencies = [
 
 [[package]]
 name = "teamy-facet-error"
-version = "0.50.0-rc.7"
+version = "0.50.0-rc.8"
 dependencies = [
  "teamy-facet",
 ]
 
 [[package]]
 name = "teamy-facet-format"
-version = "0.50.0-rc.9"
+version = "0.50.0-rc.10"
 dependencies = [
  "teamy-facet-core",
  "teamy-facet-dessert",
@@ -1700,7 +1700,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-facet-json"
-version = "0.50.0-rc.9"
+version = "0.50.0-rc.10"
 dependencies = [
  "teamy-facet",
  "teamy-facet-core",
@@ -1729,14 +1729,14 @@ dependencies = [
 
 [[package]]
 name = "teamy-facet-macros"
-version = "0.50.0-rc.7"
+version = "0.50.0-rc.8"
 dependencies = [
  "teamy-facet-macros-impl",
 ]
 
 [[package]]
 name = "teamy-facet-macros-impl"
-version = "0.50.0-rc.7"
+version = "0.50.0-rc.8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1804,7 +1804,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-figue"
-version = "6.0.0-rc.5"
+version = "6.0.0-rc.6"
 dependencies = [
  "arbitrary",
  "ariadne",
@@ -1836,7 +1836,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-figue-attrs"
-version = "6.0.0-rc.3"
+version = "6.0.0-rc.4"
 dependencies = [
  "teamy-facet",
 ]
