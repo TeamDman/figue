@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Teamy 6.0.0-rc.7 — 2026-11-16
+
+- Align exact dependencies with Facet/Error/Default rc.9 and JSON rc.11, including Figue Attrs rc.5. Preserve CLI behavior while sharing nongeneric enum metadata across consumers.
+
+
 ## [Teamy 6.0.0-rc.5] - 2026-10-20
 
 - Update the exact Teamy Format and JSON dependencies to `0.50.0-rc.9`, retaining
