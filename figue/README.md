@@ -8,15 +8,19 @@ separate identities. Use upstream `figue` unless you need this fork.
 
 ```toml
 [dependencies]
-facet = { package = "teamy-facet", version = "=0.50.0-rc.8" }
-figue = { package = "teamy-figue", version = "=6.0.0-rc.6" }
-facet-pretty = { package = "teamy-facet-pretty", version = "=0.50.0-rc.7" }
+facet = { package = "teamy-facet", version = "=0.50.0-rc.10" }
+figue = { package = "teamy-figue", version = "=6.0.0-rc.8" }
+facet-pretty = { package = "teamy-facet-pretty", version = "=0.50.0-rc.8" }
 ```
 
-The prepared 6.0.0-rc.6 release is based on upstream 5.0.0-rc.6 and uses
-Teamy Facet facade 0.50.0-rc.8, unchanged Core/Reflect 0.50.0-rc.7,
-Format/JSON 0.50.0-rc.10, and Figue Attrs 6.0.0-rc.4. This aligns the graph
-with the generic field-proxy and `Cow<T>` decoding fixes.
+The prepared 6.0.0-rc.8 release is based on upstream 5.0.0-rc.6 and uses
+Teamy Facet 0.50.0-rc.10, Core/Reflect 0.50.0-rc.8, Format
+0.50.0-rc.11, JSON 0.50.0-rc.12, and Figue Attrs
+6.0.0-rc.6. All interacting consumers must share the new Core identity.
+`PathBuf` serializes through its type-owned Cow proxy; UTF-8 path values avoid
+a text copy, while the proxy holder and map keys can still allocate. Low-level
+`OwnedPeek` inspection now uses `with_peek` callbacks rather than `as_peek()`;
+invariant and contravariant proxy shapes are rejected.
 See the [fork overview](https://github.com/TeamDman/figue/blob/teamy-main/README.md)
 and [maintained differences](https://github.com/TeamDman/figue/blob/teamy-main/FORK_DIFFERENCES.md).
 

@@ -1624,7 +1624,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-facet"
-version = "0.50.0-rc.9"
+version = "0.50.0-rc.10"
 dependencies = [
  "autocfg",
  "teamy-facet-core",
@@ -1633,7 +1633,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-facet-core"
-version = "0.50.0-rc.7"
+version = "0.50.0-rc.8"
 dependencies = [
  "autocfg",
  "bstr",
@@ -1666,14 +1666,14 @@ dependencies = [
 
 [[package]]
 name = "teamy-facet-default"
-version = "0.50.0-rc.9"
+version = "0.50.0-rc.10"
 dependencies = [
  "teamy-facet",
 ]
 
 [[package]]
 name = "teamy-facet-dessert"
-version = "0.50.0-rc.7"
+version = "0.50.0-rc.8"
 dependencies = [
  "teamy-facet-core",
  "teamy-facet-reflect",
@@ -1681,14 +1681,14 @@ dependencies = [
 
 [[package]]
 name = "teamy-facet-error"
-version = "0.50.0-rc.9"
+version = "0.50.0-rc.10"
 dependencies = [
  "teamy-facet",
 ]
 
 [[package]]
 name = "teamy-facet-format"
-version = "0.50.0-rc.10"
+version = "0.50.0-rc.11"
 dependencies = [
  "teamy-facet-core",
  "teamy-facet-dessert",
@@ -1700,7 +1700,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-facet-json"
-version = "0.50.0-rc.11"
+version = "0.50.0-rc.12"
 dependencies = [
  "teamy-facet",
  "teamy-facet-core",
@@ -1748,14 +1748,14 @@ dependencies = [
 
 [[package]]
 name = "teamy-facet-path"
-version = "0.50.0-rc.7"
+version = "0.50.0-rc.8"
 dependencies = [
  "teamy-facet-core",
 ]
 
 [[package]]
 name = "teamy-facet-pretty"
-version = "0.50.0-rc.7"
+version = "0.50.0-rc.8"
 dependencies = [
  "owo-colors",
  "teamy-facet-core",
@@ -1765,7 +1765,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-facet-reflect"
-version = "0.50.0-rc.7"
+version = "0.50.0-rc.8"
 dependencies = [
  "hashbrown 0.17.1",
  "smallvec 2.0.0-alpha.12",
@@ -1776,7 +1776,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-facet-solver"
-version = "0.50.0-rc.7"
+version = "0.50.0-rc.8"
 dependencies = [
  "strsim",
  "teamy-facet-core",
@@ -1804,7 +1804,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-figue"
-version = "6.0.0-rc.7"
+version = "6.0.0-rc.8"
 dependencies = [
  "arbitrary",
  "ariadne",
@@ -1836,7 +1836,7 @@ dependencies = [
 
 [[package]]
 name = "teamy-figue-attrs"
-version = "6.0.0-rc.5"
+version = "6.0.0-rc.6"
 dependencies = [
  "teamy-facet",
 ]

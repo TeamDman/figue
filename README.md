@@ -9,27 +9,32 @@ The maintained fork branch is [`teamy-main`](https://github.com/TeamDman/figue/t
 The old published branch is retained as `legacy/published-main-2026-10-09`.
 The current upstream base is Figue **5.0.0-rc.6**, at commit
 [`4780161`](https://github.com/bearcove/figue/commit/47801613b720a7d5a05a9c8222d90104331823e2).
-The prepared fork release is **6.0.0-rc.6**; its version is independent of the
+The prepared fork release is **6.0.0-rc.8**; its version is independent of the
 upstream release.
 
 ## Dependencies
 
-This release uses the **Teamy Facet facade 0.50.0-rc.8**, unchanged
-**Core/Reflect 0.50.0-rc.7**, **Format/JSON 0.50.0-rc.10**, and
-**Figue Attrs 6.0.0-rc.4**. These dependency updates incorporate generic
-field-proxy and `Cow<T>` decoding fixes without changing Figue's CLI grammar.
+This release uses **Teamy Facet 0.50.0-rc.10**, **Core/Reflect
+0.50.0-rc.8**, **Format 0.50.0-rc.11**, **JSON
+0.50.0-rc.12**, and **Figue Attrs 6.0.0-rc.6**. These pins
+incorporate type-owned path serialization and lifetime-safe proxy inspection
+without changing Figue's CLI grammar. Core/reflection identities change, so
+update interacting consumers together. Low-level `OwnedPeek` users must replace
+`as_peek()` with `with_peek` callbacks; invariant/contravariant proxies are rejected.
+UTF-8 path values use borrowed Cow text, while the proxy holder and map-key
+representation can still allocate.
 Keep one compatible reflection implementation throughout your application.
 Alias the packages to their canonical Rust dependency names:
 
 ```toml
 [dependencies]
-facet = { package = "teamy-facet", version = "=0.50.0-rc.8" }
-figue = { package = "teamy-figue", version = "=6.0.0-rc.6" }
+facet = { package = "teamy-facet", version = "=0.50.0-rc.10" }
+figue = { package = "teamy-figue", version = "=6.0.0-rc.8" }
 ```
 
 Rust imports remain `facet` and `figue`, including `use figue as args` for
 attributes. Other reflection dependencies must use matching Teamy packages,
-for example `facet-json = { package = "teamy-facet-json", version = "=0.50.0-rc.10" }`.
+for example `facet-json = { package = "teamy-facet-json", version = "=0.50.0-rc.12" }`.
 Upstream and Teamy Facet traits and shapes belong to different package
 identities; a type derived against upstream Facet cannot be passed directly
 to this fork's Figue APIs. Consumers need no `[patch.crates-io]` section.
