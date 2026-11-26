@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Teamy 6.0.0-rc.7 — 2026-11-26
+
+- Use Facet rc.11 so the grammar and Figue rc.9 share the same reflection types.
+
 ### Teamy 6.0.0-rc.6 — 2026-11-17
 
 - Align the attribute grammar with Facet rc.10 and the new Core identity. Attribute syntax is unchanged.

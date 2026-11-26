@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Teamy 6.0.0-rc.9 — 2026-11-26
+
+- Align exact dependencies with the Jiff 1 Facet family and Figue Attrs rc.7. CLI syntax stays the same.
+
 ### Teamy 6.0.0-rc.8 — 2026-11-17
 
 - Align exact dependencies with Facet rc.10, Core/Reflect rc.8, Format rc.11, JSON rc.12, and Figue Attrs rc.6. Adopt borrowed path serialization and safe proxy inspection without changing CLI semantics.
